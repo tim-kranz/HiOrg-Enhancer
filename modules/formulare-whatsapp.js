@@ -5,7 +5,7 @@
 
   window.HiOrgEnhancer?.registerModule({
     id: MOD_ID,
-    name: "WhatsApp (Formulare)",
+    name: "WhatsApp (Formulare) v2",
     defaultEnabled: true,
     pages: ["/formulare.php"],
     run: ({ norm }) => {
