@@ -18,7 +18,7 @@
     run: ({ norm }) => {
       const DEFAULT_CC = "+49";
       const PHONE_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-      const MAX_PARALLEL_FETCHES = 2;
+      const MAX_PARALLEL_FETCHES = 1;
 
       const LIST_ROOT_SELS = ["#et_helferlisten", "#et_posbox_freie", "#et_posbox_fest", "#et_posbox_meld", "#et_posbox_abs", "#et_posbox_zu"];
       const BOX_SEL = "li[data-uid]";
