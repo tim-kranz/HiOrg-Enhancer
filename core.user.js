@@ -285,17 +285,11 @@
 
   function hardRefreshFromGithub() {
   try {
-    // 1) Modul-States zurücksetzen
-    localStorage.removeItem("hiorgEnhancer.moduleState.v1");
-    
-    // 2) optionale weitere Keys, falls du später mehr speicherst
-    // localStorage.removeItem("hiorgEnhancer.someOtherKey");
-
-    // 3) Loader/Core Guards entfernen (für den aktuellen Tab)
+    // 1) Loader/Core Guards entfernen (für den aktuellen Tab)
     try { delete window.__hiorgEnhancerLoaded; } catch {}
     try { delete window.__HiOrgEnhancerCoreLoaded; } catch {}
 
-    // 4) harte Reload-URL mit Cachebuster (um Browser-Cache/ServiceWorker zu umgehen)
+    // 2) harte Reload-URL mit Cachebuster (um Browser-Cache/ServiceWorker zu umgehen)
     const u = new URL(location.href);
     u.searchParams.set("he_refresh", String(Date.now()));
     location.assign(u.toString());
