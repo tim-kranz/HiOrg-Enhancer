@@ -36,7 +36,7 @@
 
      {
       id: "whatsappAll",
-      name: "WhatsApp 1",
+      name: "WhatsApp",
       moduleIds: ["dienstWhatsApp"],
       defaultEnabled: true
     }
