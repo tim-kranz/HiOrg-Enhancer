@@ -7,7 +7,14 @@
     id: MOD_ID,
     name: "WhatsApp (Dienste)",
     defaultEnabled: true,
-    match: (loc) => loc && (loc.pathname === "/einteilung_dienst.php" || loc.pathname === "/einteilung_dienst_positionen.php" || loc.pathname === "/einteilung_termin.php"),
+    match: (loc) => loc && (
+      loc.pathname === "/einteilung_dienst.php"
+      || loc.pathname === "/einteilung_dienst_positionen.php"
+      || loc.pathname === "/einteilung_termin.php"
+      || loc.pathname === "/stdliste.php"
+      || loc.pathname === "/personal_verfuegbarkeit.php"
+      || loc.pathname === "/adrliste.php"
+    ),
     run: ({ norm }) => {
       const DEFAULT_CC = "+49";
       const PHONE_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
@@ -16,6 +23,9 @@
       const LIST_ROOT_SELS = ["#et_helferlisten", "#et_posbox_freie", "#et_posbox_fest", "#et_posbox_meld", "#et_posbox_abs", "#et_posbox_zu"];
       const BOX_SEL = "li[data-uid]";
       const AFTER_SEL = "img.btn_bemerkung.btn-icon-gly2-inline, img.btn_bemerkung.btn-icon-gly2";
+      const STD_ROW_SEL = "tr[row-id]";
+      const VERF_ROW_SEL = "tr.user[data-user-id]";
+      const ADR_ROW_SEL = "tr[role='row']";
 
       const WA_CLASS = "hiorg-wa-btn";
       const WA_DISABLED_CLASS = "hiorg-wa-disabled";
@@ -188,17 +198,10 @@
         return result;
       }
 
-      function ensureButton(li) {
-        if (li.querySelector(`.${WA_CLASS}`)) return;
-
-        const anchor = li.querySelector(AFTER_SEL);
-        if (!anchor) return;
-
-        const uid = li.getAttribute("data-uid");
-        if (!uid) return;
-
+      function buildButton(uid) {
         const btn = document.createElement("span");
         btn.className = WA_CLASS;
+        btn.dataset.uid = uid;
         btn.title = "WhatsApp öffnen";
         btn.classList.add(WA_DISABLED_CLASS);
         btn.innerHTML = svgWhatsApp(true);
@@ -210,8 +213,6 @@
           if (!waDigits) return;
           window.open(`https://wa.me/${encodeURIComponent(waDigits)}`, "_blank", "noopener,noreferrer");
         });
-
-        anchor.insertAdjacentElement("afterend", btn);
 
         limit(async () => {
           const result = await fetchHandyFromAdresse(uid);
@@ -238,6 +239,51 @@
           btn.dataset.waDigits = "";
           btn.title = "Nummer konnte nicht geladen werden";
         });
+
+        return btn;
+      }
+
+      function ensureButtonInContainer(scope, uid, insertTarget, appendContainer = scope) {
+        if (!scope || !uid || !appendContainer) return;
+        if (scope.querySelector(`.${WA_CLASS}[data-uid="${uid}"]`)) return;
+
+        const btn = buildButton(uid);
+
+        if (insertTarget) {
+          insertTarget.insertAdjacentElement("afterend", btn);
+        } else {
+          appendContainer.appendChild(btn);
+        }
+      }
+
+      function ensureButton(li) {
+        const anchor = li.querySelector(AFTER_SEL);
+        if (!anchor) return;
+
+        const uid = li.getAttribute("data-uid");
+        ensureButtonInContainer(li, uid, anchor);
+      }
+
+      function ensureStdlisteButton(row) {
+        const uid = row.querySelector("input.id")?.value || "";
+        const anchor = row.querySelector("td a[href^='stunden.php?helferidstd=']");
+        const cell = anchor?.closest("td") || row.querySelector("td");
+        if (!cell) return;
+        ensureButtonInContainer(row, uid, anchor ?? null, cell);
+      }
+
+      function ensureVerfuegbarkeitButton(row) {
+        const uid = row.getAttribute("data-user-id") || "";
+        const cell = row.querySelector("td") || row;
+        ensureButtonInContainer(row, uid, cell.lastElementChild ?? null, cell);
+      }
+
+      function ensureAdrlisteButton(row) {
+        const uid = row.querySelector("input[name='userIds[]']")?.value
+          || row.querySelector("input[name='id_ary[]']")?.value
+          || "";
+        const cell = row.querySelector("td[data-text]") || row.querySelector("td:nth-child(2)") || row;
+        ensureButtonInContainer(row, uid, cell.lastElementChild ?? null, cell);
       }
 
       function scanAndAttach() {
@@ -249,6 +295,16 @@
       }
 
       scanAndAttach();
+
+      if (location.pathname === "/stdliste.php") {
+        document.querySelectorAll(STD_ROW_SEL).forEach(ensureStdlisteButton);
+      }
+      if (location.pathname === "/personal_verfuegbarkeit.php") {
+        document.querySelectorAll(VERF_ROW_SEL).forEach(ensureVerfuegbarkeitButton);
+      }
+      if (location.pathname === "/adrliste.php") {
+        document.querySelectorAll(ADR_ROW_SEL).forEach(ensureAdrlisteButton);
+      }
 
       for (const rootSel of LIST_ROOT_SELS) {
         const root = document.querySelector(rootSel);
@@ -264,6 +320,34 @@
         });
 
         obs.observe(root, { subtree: true, childList: true });
+      }
+
+      if (location.pathname === "/stdliste.php") {
+        const root = document.querySelector("table");
+        if (root) {
+          const obs = new MutationObserver(() => {
+            document.querySelectorAll(STD_ROW_SEL).forEach(ensureStdlisteButton);
+          });
+          obs.observe(root, { subtree: true, childList: true });
+        }
+      }
+      if (location.pathname === "/personal_verfuegbarkeit.php") {
+        const root = document.querySelector("table");
+        if (root) {
+          const obs = new MutationObserver(() => {
+            document.querySelectorAll(VERF_ROW_SEL).forEach(ensureVerfuegbarkeitButton);
+          });
+          obs.observe(root, { subtree: true, childList: true });
+        }
+      }
+      if (location.pathname === "/adrliste.php") {
+        const root = document.querySelector("table");
+        if (root) {
+          const obs = new MutationObserver(() => {
+            document.querySelectorAll(ADR_ROW_SEL).forEach(ensureAdrlisteButton);
+          });
+          obs.observe(root, { subtree: true, childList: true });
+        }
       }
     }
   });
