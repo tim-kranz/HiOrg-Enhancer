@@ -65,6 +65,8 @@
         const raw = norm(rawPhone);
         if (!raw) return null;
 
+        if (!isMobileNumber(raw)) return null;
+
         let s = raw.replace(/[^\d+]/g, "");
         if (!s) return null;
 
@@ -84,6 +86,44 @@
 
         const digits = s.replace(/\D/g, "");
         return digits.length >= 6 ? digits : null;
+      }
+
+      function isMobileNumber(rawPhone) {
+        const raw = norm(rawPhone);
+        if (!raw) return false;
+
+        let s = raw.replace(/[^\d+]/g, "");
+        if (!s) return false;
+
+        if (s.startsWith("00")) s = "+" + s.slice(2);
+
+        if (s.startsWith("+")) {
+          const digits = s.slice(1).replace(/\D/g, "");
+          const ccDigits = DEFAULT_CC.replace(/\D/g, "");
+          if (digits.startsWith(ccDigits)) {
+            s = "0" + digits.slice(ccDigits.length);
+          } else {
+            s = digits;
+          }
+        } else {
+          s = s.replace(/\D/g, "");
+        }
+
+        return s.startsWith("01");
+      }
+
+      function extractInputValue(html, field) {
+        const patterns = [
+          new RegExp(`<input[^>]*\\bid=["']${field}["'][^>]*\\bvalue=["']([^"']*)["'][^>]*>`, "i"),
+          new RegExp(`<input[^>]*\\bname=["']${field}["'][^>]*\\bvalue=["']([^"']*)["'][^>]*>`, "i")
+        ];
+
+        for (const pattern of patterns) {
+          const match = html.match(pattern);
+          if (match) return norm(match[1]);
+        }
+
+        return "";
       }
 
       function svgWhatsApp(disabled) {
@@ -124,15 +164,28 @@
 
         const html = await resp.text();
 
-        const m =
-          html.match(/<input[^>]*\bid=["']handy["'][^>]*\bname=["']handy["'][^>]*\bvalue=["']([^"']*)["'][^>]*>/i) ||
-          html.match(/<input[^>]*\bname=["']handy["'][^>]*\bvalue=["']([^"']*)["'][^>]*>/i);
+        const fields = ["handy", "telpriv", "teldienst"];
+        const candidates = fields.map((field) => extractInputValue(html, field)).filter(Boolean);
 
-        const raw = m ? norm(m[1]) : "";
-        const phone = raw || null;
+        let phone = "";
+        let digits = null;
+        for (const candidate of candidates) {
+          phone = candidate;
+          digits = toWhatsAppDigits(candidate);
+          if (digits) break;
+        }
 
-        cacheSet(cacheKey, phone);
-        return phone;
+        if (!phone && candidates.length) {
+          phone = candidates[0];
+        }
+
+        const result = {
+          phone: phone || null,
+          digits: digits || null
+        };
+
+        cacheSet(cacheKey, result);
+        return result;
       }
 
       function ensureButton(li) {
@@ -161,8 +214,9 @@
         anchor.insertAdjacentElement("afterend", btn);
 
         limit(async () => {
-          const phone = await fetchHandyFromAdresse(uid);
-          const digits = phone ? toWhatsAppDigits(phone) : null;
+          const result = await fetchHandyFromAdresse(uid);
+          const phone = result?.phone ?? null;
+          const digits = result?.digits ?? null;
 
           if (digits) {
             btn.classList.remove(WA_DISABLED_CLASS);
