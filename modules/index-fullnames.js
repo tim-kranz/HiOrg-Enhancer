@@ -8,13 +8,15 @@
     name: "Namen",
     defaultEnabled: true,
     pages: ["/index.php"],
-    run: ({ norm }) => { console.info("[HiOrg-Enhancer] indexFullNames run", location.pathname);
+    run: ({ norm }) => { 
       const STATUS_CELL_SELECTOR = [
         "td.et_vstatus_voll",
         "td.et_vstatus_neutral",
         "td.et_vstatus_bedarf_dringend",
         'td[class*="et_vstatus_"]'
       ].join(",");
+
+      console.info("[HiOrg-Enhancer] indexFullNames run", location.pathname);
 
       const DEBOUNCE_MS = 120;
       let timer = null;
