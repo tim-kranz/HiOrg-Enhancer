@@ -1,30 +1,63 @@
-// ==UserScript==
-// @name         HiOrg Enhancer 
-// @namespace    https://tampermonkey.net/
-// @version      1.4.0
-// @description  index.php: ersetzt Kürzel durch Vollnamen; login.php: setzt OV=rkbn, erkennt Chrome-Autofill ohne Klick und submitted automatisch; einteilung_dienst.php: WhatsApp-Button pro Mitglied (Telefon aus adresse.php?user_id=...).
-// @match        https://www.hiorg-server.de/index.php*
-// @match        https://www.hiorg-server.de/login.php*
-// @match        https://www.hiorg-server.de/einteilung_dienst.php*
-// @match        https://www.hiorg-server.de/einteilung_dienst_positionen.php*
-// @match        https://www.hiorg-server.de/formulare.php*
-// @run-at       document-idle
-// @grant        none
-// ==/UserScript==
-
+// core.user.js  (im Repo-Root ablegen; ohne UserScript-Header)
 (() => {
   "use strict";
 
-  // =========================================================
-  // Konfiguration
-  // =========================================================
-  const DEFAULT_CC = "+49";                 // bei führender "0" wird +49 angenommen
-  const PHONE_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 Tage
-  const MAX_PARALLEL_FETCHES = 2;
+  if (window.__HiOrgEnhancerCoreLoaded) return;
+  window.__HiOrgEnhancerCoreLoaded = 1;
 
-  // =========================================================
-  // Shared Helpers
-  // =========================================================
+  const STORAGE_KEY = "hiorgEnhancer.moduleState.v1";
+
+  // ---------------------------------------------------------
+  // Registry
+  // ---------------------------------------------------------
+  const Enh = window.HiOrgEnhancer = window.HiOrgEnhancer || {};
+  Enh.version = "2.0.0";
+  Enh.modules = Enh.modules || new Map();
+
+  Enh.registerModule = function registerModule(def) {
+    if (!def || !def.id || typeof def.run !== "function") return;
+    if (Enh.modules.has(def.id)) return; // keine Duplikate
+    Enh.modules.set(def.id, {
+      id: String(def.id),
+      name: String(def.name || def.id),
+      defaultEnabled: def.defaultEnabled !== false,
+      pages: Array.isArray(def.pages) ? def.pages.map(String) : null, // optional
+      match: typeof def.match === "function" ? def.match : null,
+      run: def.run
+    });
+  };
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return {};
+      const obj = JSON.parse(raw);
+      return (obj && typeof obj === "object") ? obj : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveState(state) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state || {})); } catch {}
+  }
+
+  function getEnabled(moduleId) {
+    const state = loadState();
+    if (Object.prototype.hasOwnProperty.call(state, moduleId)) return !!state[moduleId];
+    const m = Enh.modules.get(moduleId);
+    return m ? !!m.defaultEnabled : true;
+  }
+
+  function setEnabled(moduleId, enabled) {
+    const state = loadState();
+    state[moduleId] = !!enabled;
+    saveState(state);
+  }
+
+  // ---------------------------------------------------------
+  // Shared Helpers (für Module)
+  // ---------------------------------------------------------
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
   async function waitFor(selector, { timeoutMs = 15000, intervalMs = 100 } = {}) {
@@ -44,629 +77,148 @@
       .trim();
   }
 
-function cacheGet(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return { hit: false, value: null };
+  Enh.util = Enh.util || {};
+  Enh.util.sleep = sleep;
+  Enh.util.waitFor = waitFor;
+  Enh.util.norm = norm;
 
-    const obj = JSON.parse(raw);
-    if (!obj || typeof obj !== "object") return { hit: false, value: null };
-    if (typeof obj.ts !== "number") return { hit: false, value: null };
-    if (Date.now() - obj.ts > PHONE_CACHE_TTL_MS) return { hit: false, value: null };
+  // ---------------------------------------------------------
+  // UI: Toggle-Liste im Bereich menu_row_00 (oberhalb der Links)
+  // ---------------------------------------------------------
+  function ensureToggleUI() {
+    // nicht überall: wenn Menü nicht existiert, UI überspringen
+    const box = document.querySelector("#menu_row_00");
+    if (!box) return;
 
-    return { hit: true, value: ("value" in obj) ? obj.value : null };
-  } catch {
-    return { hit: false, value: null };
-  }
+    if (document.getElementById("hiorgEnhancerPanel")) return;
+
+    const styleId = "hiorgEnhancerStyle";
+    if (!document.getElementById(styleId)) {
+      const st = document.createElement("style");
+      st.id = styleId;
+      st.textContent = `
+#hiorgEnhancerPanel{
+  margin: 10px 0 6px 0;
+  padding: 8px 8px 6px 8px;
+  border: 1px solid rgba(0,0,0,.10);
+  border-radius: 6px;
+  background: rgba(0,0,0,.02);
+  font-size: 12px;
 }
-
-function cacheSet(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify({ ts: Date.now(), value: value ?? null }));
-  } catch {}
+#hiorgEnhancerPanel .he-title{
+  font-weight: 600;
+  margin: 0 0 6px 0;
 }
-
-// WhatsApp erwartet digits (ohne +) im Pfad: https://wa.me/<number>
-function toWhatsAppDigits(rawPhone) {
-  const raw = norm(rawPhone);
-  if (!raw) return null;
-
-  let s = raw.replace(/[^\d+]/g, "");
-  if (!s) return null;
-
-  if (s.startsWith("00")) s = "+" + s.slice(2);
-
-  if (s.startsWith("+")) {
-    const digits = s.slice(1).replace(/\D/g, "");
-    return digits.length >= 6 ? digits : null;
-  }
-
-  if (s.startsWith("0")) {
-    const rest = s.replace(/^0+/, "");
-    const ccDigits = DEFAULT_CC.replace(/\D/g, "");
-    const digits = (ccDigits + rest).replace(/\D/g, "");
-    return digits.length >= 6 ? digits : null;
-  }
-
-  const digits = s.replace(/\D/g, "");
-  return digits.length >= 6 ? digits : null;
+#hiorgEnhancerPanel .he-row{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
 }
-
-
-  // =========================================================
-  // Modul A: index.php – Vollnamen statt Kürzel
-  // =========================================================
-  function runIndexFullNames() {
-    const STATUS_CELL_SELECTOR = [
-      "td.et_vstatus_voll",
-      "td.et_vstatus_neutral",
-      "td.et_vstatus_bedarf_dringend",
-      'td[class*="et_vstatus_"]'
-    ].join(",");
-
-    const DEBOUNCE_MS = 120;
-    let timer = null;
-
-    function flipNameOrder(title) {
-      const t = norm(title);
-      if (!t) return null;
-      const parts = t.split(" ");
-      if (parts.length < 2) return t;
-
-      const lastName = parts[0];
-      const firstName = parts.slice(1).join(" ");
-      return norm(`${firstName} ${lastName}`);
+#hiorgEnhancerPanel .he-row label{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+#hiorgEnhancerPanel .he-row input[type="checkbox"]{
+  transform: scale(1.05);
+}
+#hiorgEnhancerPanel .he-badge{
+  display:inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,.12);
+  opacity: .85;
+}
+#hiorgEnhancerPanel .he-badge-on{ }
+#hiorgEnhancerPanel .he-badge-off{ opacity: .55; }
+#hiorgEnhancerPanel .he-hint{
+  margin-top: 6px;
+  opacity: .75;
+}
+      `;
+      document.documentElement.appendChild(st);
     }
 
-    function shouldProcessSpan(span) {
-      const title = span.getAttribute("title");
-      if (!title) return false;
+    const panel = document.createElement("div");
+    panel.id = "hiorgEnhancerPanel";
 
-      const txt = norm(span.textContent);
-      if (!txt) return false;
+    const title = document.createElement("div");
+    title.className = "he-title";
+    title.textContent = "HiOrg-Enhancer";
+    panel.appendChild(title);
 
-      // schon Vollname?
-      if (txt.includes(" ")) return false;
+    // Module sortiert nach Name
+    const mods = [...Enh.modules.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
+    for (const m of mods) {
+      const row = document.createElement("div");
+      row.className = "he-row";
 
-      const parts = norm(title).split(" ");
-      return parts.length >= 2;
-    }
+      const label = document.createElement("label");
 
-    function replaceInCell(cell) {
-      const spans = cell.querySelectorAll("span[title]");
-      spans.forEach((sp) => {
-        if (!shouldProcessSpan(sp)) return;
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = getEnabled(m.id);
 
-        const fullName = flipNameOrder(sp.getAttribute("title"));
-        if (!fullName) return;
+      const nameSpan = document.createElement("span");
+      nameSpan.textContent = m.name;
 
-        if (!sp.dataset.hiorgShort) sp.dataset.hiorgShort = norm(sp.textContent);
-        if (norm(sp.textContent) === fullName) return;
+      label.appendChild(cb);
+      label.appendChild(nameSpan);
 
-        sp.textContent = fullName;
+      const badge = document.createElement("span");
+      badge.className = "he-badge " + (cb.checked ? "he-badge-on" : "he-badge-off");
+      badge.textContent = cb.checked ? "aktiv" : "aus";
 
-        const originalTitle = sp.getAttribute("title");
-        sp.setAttribute("title", `${originalTitle} (Kürzel: ${sp.dataset.hiorgShort})`);
-      });
-    }
+      cb.addEventListener("change", () => {
+        setEnabled(m.id, cb.checked);
+        badge.textContent = cb.checked ? "aktiv" : "aus";
+        badge.className = "he-badge " + (cb.checked ? "he-badge-on" : "he-badge-off");
 
-    function apply() {
-      document.querySelectorAll(STATUS_CELL_SELECTOR).forEach(replaceInCell);
-    }
-
-    function schedule() {
-      if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(apply, DEBOUNCE_MS);
-    }
-
-    apply();
-
-    const obs = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        if (m.type === "childList") {
-          const target = m.target && m.target.nodeType === 1 ? m.target : null;
-
-          const touchesStatusCell =
-            (target && target.closest && target.closest(STATUS_CELL_SELECTOR)) ||
-            [...(m.addedNodes || [])].some(
-              (n) =>
-                n.nodeType === 1 &&
-                (n.matches?.(STATUS_CELL_SELECTOR) ||
-                  n.querySelector?.(STATUS_CELL_SELECTOR) ||
-                  n.closest?.(STATUS_CELL_SELECTOR))
-            );
-
-          if (touchesStatusCell) { schedule(); break; }
-        } else if (m.type === "characterData") {
-          const p = m.target && m.target.parentElement;
-          if (p && p.closest && p.closest(STATUS_CELL_SELECTOR)) { schedule(); break; }
-        }
-      }
-    });
-
-    obs.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
-  }
-
-  // =========================================================
-  // Modul B: login.php – Auto-Login (rkbn) ohne Zusatzklick
-  // =========================================================
-  function runLoginAuto(ovValue) {
-    const OV = ovValue;
-
-    const SELECTORS = {
-      plz: 'input#plz[name="plz"]',
-      ovGoBtn: 'button[type="submit"][name="askforovsubmit"][value="1"]',
-      form: 'form#loginform, form[name="login"]',
-      user: 'input#username[name="username"]',
-      pass: 'input#password[name="password"]',
-      ov: 'input#ov[name="ov"]',
-      loginBtn: 'button[type="submit"][name="submit"][value="Login"]'
-    };
-
-    function setNativeValue(input, value) {
-      const last = input.value;
-      const proto = Object.getPrototypeOf(input);
-      const desc = Object.getOwnPropertyDescriptor(proto, "value");
-      if (desc && typeof desc.set === "function") desc.set.call(input, value);
-      else input.value = value;
-
-      if (last !== value) {
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-    }
-
-    function looksAutofilled(el) {
-      try { return el.matches(":-webkit-autofill"); } catch { return false; }
-    }
-
-    function installAutofillDetector(onAutofill) {
-      const style = document.createElement("style");
-      style.textContent = `
-@keyframes hiorgAutofillStart { from { opacity: 1; } to { opacity: 1; } }
-input:-webkit-autofill { animation-name: hiorgAutofillStart; animation-duration: 0.01s; }
-`;
-      document.documentElement.appendChild(style);
-
-      document.addEventListener("animationstart", (e) => {
-        if (e.animationName !== "hiorgAutofillStart") return;
-        const t = e.target;
-        if (!(t instanceof HTMLInputElement)) return;
-        if (t.id === "username" || t.id === "password") onAutofill();
-      }, true);
-    }
-
-    function submitLogin(form) {
-      const btn = document.querySelector(SELECTORS.loginBtn);
-      if (form && typeof form.requestSubmit === "function") { form.requestSubmit(btn || undefined); return true; }
-      if (btn) { btn.click(); return true; }
-      if (form) { form.submit(); return true; }
-      return false;
-    }
-
-    async function step1_enterOvAndGo() {
-      const plz = await waitFor(SELECTORS.plz);
-      const btn = await waitFor(SELECTORS.ovGoBtn);
-      if (!plz || !btn) return false;
-      setNativeValue(plz, OV);
-      btn.click();
-      return true;
-    }
-
-    async function step2_waitAutofillAndSubmit() {
-      const form = await waitFor(SELECTORS.form);
-      const user = await waitFor(SELECTORS.user);
-      const pass = await waitFor(SELECTORS.pass);
-      const ov = await waitFor(SELECTORS.ov);
-      if (!form || !user || !pass || !ov) return false;
-
-      if ((ov.value || "").trim() !== OV) setNativeValue(ov, OV);
-
-      let submitted = false;
-
-      const trySubmit = () => {
-        if (submitted) return;
-
-        const userOk = (user.value || "").trim().length > 0 || looksAutofilled(user);
-        const passOk = (pass.value || "").trim().length > 0 || looksAutofilled(pass);
-
-        if (userOk && passOk) {
-          user.focus(); pass.focus(); pass.blur(); user.blur();
-          submitted = submitLogin(form);
-        }
-      };
-
-      installAutofillDetector(() => {
-        setTimeout(trySubmit, 50);
-        setTimeout(trySubmit, 250);
+        // Seite neu laden, damit Module sauber (de)aktiviert werden
+        location.reload();
       });
 
-      const end = Date.now() + 30000;
-      while (!submitted && Date.now() < end) {
-        trySubmit();
-        await sleep(200);
-      }
-
-      return submitted;
+      row.appendChild(label);
+      row.appendChild(badge);
+      panel.appendChild(row);
     }
 
-    (async () => {
-      const url = new URL(location.href);
+    const hint = document.createElement("div");
+    hint.className = "he-hint";
+    hint.textContent = "Änderungen werden gespeichert, nach Umschalten wird die Seite neu geladen.";
+    panel.appendChild(hint);
 
-      if (url.pathname === "/login.php" && !url.searchParams.has("ov")) {
-        await step1_enterOvAndGo();
-        return;
-      }
-
-      if (url.pathname === "/login.php" && url.searchParams.get("ov") === OV) {
-        await step2_waitAutofillAndSubmit();
-        return;
-      }
-    })();
+    // Einfügen: in #menu_row_00 ganz oben (unter [ tim.kranz ])
+    const firstUl = box.querySelector("ul");
+    if (firstUl) firstUl.insertAdjacentElement("beforebegin", panel);
+    else box.appendChild(panel);
   }
 
-  // =========================================================
-  // Modul C: einteilung_dienst.php – WhatsApp Button pro Mitglied
-  // =========================================================
-  function runDienstWhatsAppButtons() {
-
-
-    // Ziel: in jeder .et_helferbox nach dem .btn_bemerkung ein WA-Icon einhängen
-const LIST_ROOT_SELS = ["#et_helferlisten", "#et_posbox_freie", "#et_posbox_fest", "#et_posbox_meld", "#et_posbox_abs", "#et_posbox_zu"];
-const BOX_SEL = "li[data-uid]";
-const AFTER_SEL = "img.btn_bemerkung.btn-icon-gly2-inline, img.btn_bemerkung.btn-icon-gly2";
-
-    const WA_CLASS = "hiorg-wa-btn";
-    const WA_DISABLED_CLASS = "hiorg-wa-disabled";
-    const WA_OK_CLASS = "hiorg-wa-ok";
-
-    // Simple Styles (kein Farbzwang, nutzt currentColor)
-    const style = document.createElement("style");
-    style.textContent = `
-.${WA_CLASS}{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  width:16px;
-  height:16px;
-  margin-left:6px;
-  vertical-align:middle;
-  cursor:pointer;
-}
-.${WA_CLASS} svg{ width:16px; height:16px; display:block; }
-.${WA_DISABLED_CLASS}{
-  cursor:not-allowed;
-  opacity:.45;
-}
-.${WA_OK_CLASS}{
-  color:#1fa855; /* grün */
-}
-`;
-    document.documentElement.appendChild(style);
-
-
-function svgWhatsApp(disabled) {
-  return `
-<svg xmlns="http://www.w3.org/2000/svg"
-     width="16" height="16"
-     fill="currentColor"
-     viewBox="0 0 16 16"
-     style="${disabled ? 'opacity:.45' : ''}">
-  <path d="M13.601 2.326A7.85 7.85 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.9 7.9 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.9 7.9 0 0 0 13.6 2.326zM7.994 14.521a6.6 6.6 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.56 6.56 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592m3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.73.73 0 0 0-.529.247c-.182.198-.691.677-.691 1.654s.71 1.916.81 2.049c.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232"/>
-</svg>`;
-}
-
-    // Concurrency limiter (sehr klein, reicht)
-    let active = 0;
-    const queue = [];
-    function limit(fn) {
-      return new Promise((resolve, reject) => {
-        queue.push({ fn, resolve, reject });
-        pump();
-      });
-    }
-    function pump() {
-      while (active < MAX_PARALLEL_FETCHES && queue.length) {
-        const job = queue.shift();
-        active++;
-        Promise.resolve()
-          .then(job.fn)
-          .then(job.resolve, job.reject)
-          .finally(() => { active--; pump(); });
-      }
-    }
-
-    async function fetchHandyFromAdresse(uid) {
-      const cacheKey = `hiorg_phone_${uid}`;
-      const cached = cacheGet(cacheKey);
-if (cached.hit) return cached.value;
-
-      const url = `/adresse.php?user_id=${encodeURIComponent(uid)}`;
-
-      // same-origin fetch, Cookies werden mitgesendet
-      const resp = await fetch(url, { credentials: "include" });
-      if (!resp.ok) {
-        cacheSet(cacheKey, null);
-        return null;
-      }
-
-      const html = await resp.text();
-
-      // robust: input id="handy" name="handy" value="..."
-      const m = html.match(/<input[^>]*\bid=["']handy["'][^>]*\bname=["']handy["'][^>]*\bvalue=["']([^"']*)["'][^>]*>/i)
-             || html.match(/<input[^>]*\bname=["']handy["'][^>]*\bvalue=["']([^"']*)["'][^>]*>/i);
-
-      const raw = m ? norm(m[1]) : "";
-      const phone = raw || null;
-
-      cacheSet(cacheKey, phone);
-      return phone;
-    }
-
-    function ensureButton(li) {
-      // schon vorhanden?
-      if (li.querySelector(`.${WA_CLASS}`)) return;
-
-      const anchor = li.querySelector(AFTER_SEL);
-      if (!anchor) return;
-
-      const uid = li.getAttribute("data-uid");
-      if (!uid) return;
-
-      const btn = document.createElement("span");
-      btn.className = WA_CLASS;
-      btn.title = "WhatsApp öffnen";
-
-      // initial: disabled (bis Nummer da ist)
-      btn.classList.add(WA_DISABLED_CLASS);
-      btn.innerHTML = svgWhatsApp(true);
-
-      btn.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-
-        const waDigits = btn.dataset.waDigits || "";
-        if (!waDigits) return;
-
-        window.open(`https://wa.me/${encodeURIComponent(waDigits)}`, "_blank", "noopener,noreferrer");
-      });
-
-      anchor.insertAdjacentElement("afterend", btn);
-
-      // Nummer laden (mit Limit)
-      limit(async () => {
-        const phone = await fetchHandyFromAdresse(uid);
-        const digits = phone ? toWhatsAppDigits(phone) : null;
-if (digits) {
-  btn.classList.remove(WA_DISABLED_CLASS);
-  btn.classList.add(WA_OK_CLASS);
-  btn.innerHTML = svgWhatsApp(false);
-  btn.dataset.waDigits = digits;
-  btn.title = `WhatsApp öffnen (${phone})`;
-} else {
-  btn.classList.remove(WA_OK_CLASS);
-  btn.classList.add(WA_DISABLED_CLASS);
-  btn.innerHTML = svgWhatsApp(true);
-  btn.dataset.waDigits = "";
-  btn.title = phone ? `Keine WhatsApp-geeignete Nummer (${phone})` : "Keine Handynummer hinterlegt";
-}
-      }).catch(() => {
-        btn.classList.remove(WA_OK_CLASS);
-btn.classList.add(WA_DISABLED_CLASS);
-btn.innerHTML = svgWhatsApp(true);
-btn.dataset.waDigits = "";
-btn.title = "Nummer konnte nicht geladen werden";
-
-      });
-    }
-
-   function scanAndAttach() {
-  for (const rootSel of LIST_ROOT_SELS) {
-    const root = document.querySelector(rootSel);
-    if (!root) continue;
-    root.querySelectorAll(BOX_SEL).forEach(ensureButton);
-  }
-}
-
-// initial
-scanAndAttach();
-
-// Observer: beobachte alle Roots, die existieren
-for (const rootSel of LIST_ROOT_SELS) {
-  const root = document.querySelector(rootSel);
-  if (!root) continue;
-
-  const obs = new MutationObserver((muts) => {
-    for (const m of muts) {
-      if (m.type === "childList" && (m.addedNodes?.length || 0) > 0) {
-        scanAndAttach();
-        break;
-      }
-    }
-  });
-
-  obs.observe(root, { subtree: true, childList: true });
-}
+  // ---------------------------------------------------------
+  // Runner
+  // ---------------------------------------------------------
+  function shouldRunModule(mod) {
+    if (!getEnabled(mod.id)) return false;
+    if (mod.match) return !!mod.match(location);
+    if (mod.pages && mod.pages.length) return mod.pages.includes(String(location.pathname || ""));
+    return true;
   }
 
-
-      // =========================================================
-  // Modul D: formulare.php – WhatsApp-Icon neben Telefonnummern im Text
-  // =========================================================
-  function runFormulareWhatsApp() {
-    const WA_CLASS = "hiorg-wa-btn";
-    const WA_DISABLED_CLASS = "hiorg-wa-disabled";
-    const WA_OK_CLASS = "hiorg-wa-ok";
-
-    // Styles (nur einmal einfügen)
-    if (!document.getElementById("hiorg-wa-style")) {
-      const style = document.createElement("style");
-      style.id = "hiorg-wa-style";
-      style.textContent = `
-.${WA_CLASS}{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  width:16px;
-  height:16px;
-  margin-left:6px;
-  vertical-align:middle;
-  cursor:pointer;
-}
-.${WA_CLASS} svg{ width:16px; height:16px; display:block; }
-.${WA_DISABLED_CLASS}{
-  cursor:not-allowed;
-  opacity:.45;
-}
-.${WA_OK_CLASS}{
-  color:#1fa855;
-}
-`;
-      document.documentElement.appendChild(style);
+  function runMatchingModules() {
+    for (const mod of Enh.modules.values()) {
+      if (!shouldRunModule(mod)) continue;
+      try { mod.run(Enh.util); }
+      catch (e) { console.warn("[HiOrg-Enhancer] module crashed:", mod.id, e); }
     }
-
-    function svgWhatsApp(disabled) {
-      return `
-<svg xmlns="http://www.w3.org/2000/svg"
-     width="16" height="16"
-     fill="currentColor"
-     viewBox="0 0 16 16"
-     style="${disabled ? "opacity:.45" : ""}">
-  <path d="M13.601 2.326A7.85 7.85 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.9 7.9 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.9 7.9 0 0 0 13.6 2.326zM7.994 14.521a6.6 6.6 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.56 6.56 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592m3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.73.73 0 0 0-.529.247c-.182.198-.691.677-.691 1.654s.71 1.916.81 2.049c.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232"/>
-</svg>`;
-    }
-
-    // Telefonnummern in DE-typischer Schreibweise finden:
-    // Beispiele: 0173 5492477, 01735492477, +49 173 5492477, 0049 173 5492477
-    // (relativ konservativ, um nicht zu viele False Positives zu erzeugen)
-    const PHONE_RX = /(?:(?:\+|00)\s*49|0)\s*(?:1[5-7]\d)\s*(?:[\d\s\/-]{5,})\d/g;
-
-    function isInside(el, selector) {
-      return !!(el && el.closest && el.closest(selector));
-    }
-
-    function buildButton(rawPhone) {
-      const digits = toWhatsAppDigits(rawPhone);
-      const btn = document.createElement("span");
-      btn.className = WA_CLASS;
-      btn.innerHTML = svgWhatsApp(!digits);
-
-      if (digits) {
-        btn.classList.add(WA_OK_CLASS);
-        btn.title = `WhatsApp öffnen (${rawPhone})`;
-        btn.addEventListener("click", (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          window.open(`https://wa.me/${encodeURIComponent(digits)}`, "_blank", "noopener,noreferrer");
-        });
-      } else {
-        btn.classList.add(WA_DISABLED_CLASS);
-        btn.title = `Keine WhatsApp-geeignete Nummer (${rawPhone})`;
-      }
-      return btn;
-    }
-
-    function replacePhonesInTextNode(textNode) {
-      const text = textNode.nodeValue || "";
-      if (!PHONE_RX.test(text)) return;
-      PHONE_RX.lastIndex = 0;
-
-      const frag = document.createDocumentFragment();
-      let last = 0;
-      let m;
-
-      while ((m = PHONE_RX.exec(text)) !== null) {
-        const start = m.index;
-        const end = start + m[0].length;
-        const rawPhone = norm(m[0]);
-
-        if (start > last) frag.appendChild(document.createTextNode(text.slice(last, start)));
-
-        // Nummer als Text lassen + Button daneben
-        const phoneSpan = document.createElement("span");
-        phoneSpan.textContent = text.slice(start, end);
-        frag.appendChild(phoneSpan);
-
-        // nicht doppelt einfügen, wenn direkt dahinter schon unser Button steht
-        frag.appendChild(buildButton(rawPhone));
-
-        last = end;
-      }
-
-      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
-
-      textNode.parentNode.replaceChild(frag, textNode);
-    }
-
-    function scan() {
-      // TreeWalker über BODY, aber: nicht in <script>/<style>/<textarea> und nicht in Links/Buttons
-      const walker = document.createTreeWalker(
-        document.body,
-        NodeFilter.SHOW_TEXT,
-        {
-          acceptNode(node) {
-            const p = node.parentElement;
-            if (!p) return NodeFilter.FILTER_REJECT;
-
-            if (isInside(p, "script,style,textarea,pre,code")) return NodeFilter.FILTER_REJECT;
-            if (isInside(p, `.${WA_CLASS}`)) return NodeFilter.FILTER_REJECT;
-
-            const t = (node.nodeValue || "").trim();
-            if (!t) return NodeFilter.FILTER_REJECT;
-
-            return PHONE_RX.test(t) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
-          }
-        }
-      );
-
-      const nodes = [];
-      let n;
-      while ((n = walker.nextNode())) nodes.push(n);
-
-      // ersetzen (nachdem wir gesammelt haben, damit TreeWalker nicht durcheinander kommt)
-      nodes.forEach(replacePhonesInTextNode);
-    }
-
-    scan();
-
-    // Falls Inhalte später per JS nachgeladen werden: kurz beobachten
-    const obs = new MutationObserver((muts) => {
-      for (const m of muts) {
-        if (m.type === "childList" && (m.addedNodes?.length || 0) > 0) {
-          scan();
-          break;
-        }
-      }
-    });
-    obs.observe(document.body, { subtree: true, childList: true });
   }
 
-
-  // =========================================================
-  // Router
-  // =========================================================
-  const path = location.pathname;
-
-  if (path === "/index.php") {
-    runIndexFullNames();
-    return;
-  }
-
-  if (path === "/login.php") {
-    runLoginAuto("rkbn");
-    return;
-  }
-
-  if (path === "/einteilung_dienst.php") {
-    runDienstWhatsAppButtons();
-    return;
-  }
-  if (path === "/einteilung_dienst_positionen.php") {
-  runDienstWhatsAppButtons();
-  return;
-  }
-      if (path === "/formulare.php") {
-    runFormulareWhatsApp();
-    return;
-  }
+  // UI + Module starten (UI leicht verzögert, falls Menü spät gerendert wird)
+  (async () => {
+    await Enh.util.sleep(50);
+    ensureToggleUI();
+    runMatchingModules();
+  })();
 })();
