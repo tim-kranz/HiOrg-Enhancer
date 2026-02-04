@@ -207,17 +207,12 @@
     label.appendChild(cb);
     label.appendChild(nameSpan);
 
-    const badge = document.createElement("span");
-    badge.className = "he-badge " + (cb.checked ? "" : "he-badge-off");
-    badge.textContent = cb.checked ? "aktiv" : "aus";
-
     cb.addEventListener("change", () => {
       onChange(!!cb.checked);
       reloadEnhancer();
     });
 
     row.appendChild(label);
-    row.appendChild(badge);
     return row;
   }
 
@@ -230,24 +225,23 @@
 
     // 1) Gruppen (optional)
     const groups = MODULE_GROUPS.filter(g => g && g.id && Array.isArray(g.moduleIds) && g.moduleIds.length);
+    const groupedModuleIds = new Set(groups.flatMap(g => g.moduleIds));
     if (groups.length) {
-      for (const g of groups) {
+      const sortedGroups = [...groups].sort((a, b) => (a.name || "").localeCompare(b.name || "", "de", { sensitivity: "base" }));
+      for (const g of sortedGroups) {
         panel.appendChild(makeRow({
           labelText: g.name,
           checked: getGroupEnabled(g),
           onChange: (enabled) => setGroupEnabled(g, enabled)
         }));
       }
-
-      const sep = document.createElement("div");
-      sep.className = "he-sep";
-      panel.appendChild(sep);
     }
 
     // 2) Einzelmodule (ohne hidden)
     const mods = [...Enh.modules.values()]
       .filter(m => !HIDDEN_MODULE_IDS.has(m.id))
-      .sort((a, b) => a.name.localeCompare(b.name, "de"));
+      .filter(m => !groupedModuleIds.has(m.id))
+      .sort((a, b) => a.name.localeCompare(b.name, "de", { sensitivity: "base" }));
 
     if (mods.length === 0 && groups.length === 0) {
       const hint0 = document.createElement("div");
