@@ -87,7 +87,7 @@
   // ---------------------------------------------------------
   function ensureToggleUI() {
     // nicht überall: wenn Menü nicht existiert, UI überspringen
-    const box = document.querySelector("#menu_row_00");
+    const box = document.querySelector("#menu_row_00_wrap");
     if (!box) return;
 
     if (document.getElementById("hiorgEnhancerPanel")) return;
