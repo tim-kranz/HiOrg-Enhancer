@@ -169,6 +169,28 @@
   return panel;
 }
 
+  let reloadHintEl = null;
+
+  function setReloadHint(text) {
+    if (reloadHintEl) reloadHintEl.textContent = text || "";
+  }
+
+  function reloadEnhancer() {
+    if (typeof window.__HiOrgEnhancerReload === "function") {
+      setReloadHint("Lade Scripts neu ...");
+      window.__HiOrgEnhancerReload({ cacheBust: true })
+        .then(() => setReloadHint("Reload abgeschlossen."))
+        .catch((err) => {
+          console.warn("[HiOrg-Enhancer] soft reload failed, falling back:", err);
+          setReloadHint("Soft-Reload fehlgeschlagen, nutze Seiten-Reload.");
+          hardRefreshFromGithub();
+        });
+      return;
+    }
+
+    hardRefreshFromGithub();
+  }
+
   function makeRow({ labelText, checked, onChange }) {
     const row = document.createElement("div");
     row.className = "he-row";
@@ -191,7 +213,7 @@
 
     cb.addEventListener("change", () => {
       onChange(!!cb.checked);
-      location.reload();
+      reloadEnhancer();
     });
 
     row.appendChild(label);
@@ -248,13 +270,14 @@
     btn.textContent = "Reload";
     btn.style.marginTop = "6px";
     btn.style.width = "100%";
-    btn.addEventListener("click", () => hardRefreshFromGithub());
+    btn.addEventListener("click", () => reloadEnhancer());
     panel.appendChild(btn);
 
     const hint = document.createElement("div");
     hint.className = "he-hint";
     hint.textContent = "";
     panel.appendChild(hint);
+    reloadHintEl = hint;
   }
 
   function hardRefreshFromGithub() {
