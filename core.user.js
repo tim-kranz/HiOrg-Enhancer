@@ -156,7 +156,7 @@
   title.textContent = "HiOrg-Enhancer";
   panel.appendChild(title);
 
-  // WICHTIG: oberhalb von "HiOrg-Server RKBN" einfügen
+
   wrap.insertAdjacentElement("beforebegin", panel);
 
   return panel;
@@ -265,7 +265,7 @@
     // 4) harte Reload-URL mit Cachebuster (um Browser-Cache/ServiceWorker zu umgehen)
     const u = new URL(location.href);
     u.searchParams.set("he_refresh", String(Date.now()));
-    location.href = u.toString();
+    location.assign(u.toString());
   } catch {
     // Fallback: normaler Reload
     location.reload();
