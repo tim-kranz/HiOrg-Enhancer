@@ -1,4 +1,3 @@
-// modules/index-fullnames.js  (ohne UserScript-Header)
 (() => {
   "use strict";
 

@@ -1,4 +1,3 @@
-// modules/formulare-whatsapp.js  (ohne UserScript-Header)
 (() => {
   "use strict";
 

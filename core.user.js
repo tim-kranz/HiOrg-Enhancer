@@ -1,4 +1,3 @@
-// core.user.js  (im Repo-Root ablegen; ohne UserScript-Header)
 (() => {
   "use strict";
 

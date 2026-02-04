@@ -1,4 +1,3 @@
-// modules/login-autologin.js  (ohne UserScript-Header)
 (() => {
   "use strict";
 

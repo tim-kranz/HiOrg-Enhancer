@@ -1,4 +1,3 @@
-// modules/dienst-whatsapp.js  (ohne UserScript-Header)
 (() => {
   "use strict";
 

@@ -1,4 +1,3 @@
-// manifest.json  (im Repo-Root ablegen)
 {
   "files": [
     "core.user.js",
