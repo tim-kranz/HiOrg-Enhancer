@@ -36,7 +36,7 @@
 
      {
       id: "whatsappAll",
-      name: "WhatsApp Bundle",
+      name: "WhatsApp",
       moduleIds: ["formulareWhatsApp"],
       defaultEnabled: true
     }
