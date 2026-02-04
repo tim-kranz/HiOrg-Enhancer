@@ -236,11 +236,41 @@
       }));
     }
 
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Cache löschen & neu laden";
+    btn.style.marginTop = "6px";
+    btn.style.width = "100%";
+    btn.addEventListener("click", () => hardRefreshFromGithub());
+    panel.appendChild(btn);
+
     const hint = document.createElement("div");
     hint.className = "he-hint";
     hint.textContent = "";
     panel.appendChild(hint);
   }
+
+  function hardRefreshFromGithub() {
+  try {
+    // 1) Modul-States zurücksetzen
+    localStorage.removeItem("hiorgEnhancer.moduleState.v1");
+
+    // 2) optionale weitere Keys, falls du später mehr speicherst
+    // localStorage.removeItem("hiorgEnhancer.someOtherKey");
+
+    // 3) Loader/Core Guards entfernen (für den aktuellen Tab)
+    try { delete window.__hiorgEnhancerLoaded; } catch {}
+    try { delete window.__HiOrgEnhancerCoreLoaded; } catch {}
+
+    // 4) harte Reload-URL mit Cachebuster (um Browser-Cache/ServiceWorker zu umgehen)
+    const u = new URL(location.href);
+    u.searchParams.set("he_refresh", String(Date.now()));
+    location.href = u.toString();
+  } catch {
+    // Fallback: normaler Reload
+    location.reload();
+  }
+}
 
   // ---------------------------------------------------------
   // Register (mit UI-Refresh)
