@@ -230,6 +230,7 @@
 
     // 1) Gruppen (optional)
     const groups = MODULE_GROUPS.filter(g => g && g.id && Array.isArray(g.moduleIds) && g.moduleIds.length);
+    const groupedModuleIds = new Set(groups.flatMap(g => g.moduleIds));
     if (groups.length) {
       for (const g of groups) {
         panel.appendChild(makeRow({
@@ -247,6 +248,7 @@
     // 2) Einzelmodule (ohne hidden)
     const mods = [...Enh.modules.values()]
       .filter(m => !HIDDEN_MODULE_IDS.has(m.id))
+      .filter(m => !groupedModuleIds.has(m.id))
       .sort((a, b) => a.name.localeCompare(b.name, "de"));
 
     if (mods.length === 0 && groups.length === 0) {
