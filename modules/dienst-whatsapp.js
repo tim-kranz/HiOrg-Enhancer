@@ -5,7 +5,7 @@
 
   window.HiOrgEnhancer?.registerModule({
     id: MOD_ID,
-    name: "Dienste: WhatsApp-Button (Listen)",
+    name: "WhatsApp",
     defaultEnabled: true,
     match: (loc) => loc && (loc.pathname === "/einteilung_dienst.php" || loc.pathname === "/einteilung_dienst_positionen.php"),
     run: ({ norm }) => {
