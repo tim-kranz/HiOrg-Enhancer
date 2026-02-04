@@ -5,7 +5,7 @@
 
   window.HiOrgEnhancer?.registerModule({
     id: MOD_ID,
-    name: "Übersicht: Vollnamen",
+    name: "Namen",
     defaultEnabled: true,
     pages: ["/index.php"],
     run: ({ norm }) => {
