@@ -24,7 +24,131 @@
       match: typeof def.match === "function" ? def.match : null,
       run: def.run
     });
-  };
+  }
+  
+  
+  function ensurePanelHost() {
+  const box = document.querySelector("#menu_row_00"); // du bist hier korrekt
+  if (!box) return null;
+
+  let panel = document.getElementById("hiorgEnhancerPanel");
+  if (panel) return panel;
+
+  // Styles nur einmal
+  const styleId = "hiorgEnhancerStyle";
+  if (!document.getElementById(styleId)) {
+    const st = document.createElement("style");
+    st.id = styleId;
+    st.textContent = `
+#hiorgEnhancerPanel{
+  margin: 10px 0 6px 0;
+  padding: 8px 8px 6px 8px;
+  border: 1px solid rgba(0,0,0,.10);
+  border-radius: 6px;
+  background: rgba(0,0,0,.02);
+  font-size: 12px;
+}
+#hiorgEnhancerPanel .he-title{ font-weight: 600; margin: 0 0 6px 0; }
+#hiorgEnhancerPanel .he-row{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:8px; padding:3px 0;
+}
+#hiorgEnhancerPanel .he-row label{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+#hiorgEnhancerPanel .he-row input[type="checkbox"]{ transform: scale(1.05); }
+#hiorgEnhancerPanel .he-badge{
+  display:inline-block; padding:1px 6px; border-radius:999px;
+  border:1px solid rgba(0,0,0,.12); opacity:.85;
+}
+#hiorgEnhancerPanel .he-badge-off{ opacity:.55; }
+#hiorgEnhancerPanel .he-hint{ margin-top:6px; opacity:.75; }
+    `;
+    document.documentElement.appendChild(st);
+  }
+
+  panel = document.createElement("div");
+  panel.id = "hiorgEnhancerPanel";
+
+  const title = document.createElement("div");
+  title.className = "he-title";
+  title.textContent = "HiOrg-Enhancer";
+  panel.appendChild(title);
+
+  // Panel direkt unter dem User-Block einfügen (vor dem ersten <ul>)
+  const firstUl = box.querySelector("ul");
+  if (firstUl) firstUl.insertAdjacentElement("beforebegin", panel);
+  else box.appendChild(panel);
+
+  return panel;
+}
+
+function renderPanel() {
+  const panel = ensurePanelHost();
+  if (!panel) return;
+
+  // alte Rows entfernen (Title bleibt)
+  panel.querySelectorAll(".he-row, .he-hint").forEach((n) => n.remove());
+
+  const mods = [...Enh.modules.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
+
+  if (mods.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "he-hint";
+    hint.textContent = "Keine Module registriert.";
+    panel.appendChild(hint);
+    return;
+  }
+
+  for (const m of mods) {
+    const row = document.createElement("div");
+    row.className = "he-row";
+
+    const label = document.createElement("label");
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = getEnabled(m.id);
+
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = m.name;
+
+    label.appendChild(cb);
+    label.appendChild(nameSpan);
+
+    const badge = document.createElement("span");
+    badge.className = "he-badge " + (cb.checked ? "" : "he-badge-off");
+    badge.textContent = cb.checked ? "aktiv" : "aus";
+
+    cb.addEventListener("change", () => {
+      setEnabled(m.id, cb.checked);
+      badge.textContent = cb.checked ? "aktiv" : "aus";
+      badge.className = "he-badge " + (cb.checked ? "" : "he-badge-off");
+      location.reload();
+    });
+
+    row.appendChild(label);
+    row.appendChild(badge);
+    panel.appendChild(row);
+  }
+
+  const hint = document.createElement("div");
+  hint.className = "he-hint";
+  hint.textContent = "Änderungen werden gespeichert, nach Umschalten wird die Seite neu geladen.";
+  panel.appendChild(hint);
+}
+
+// 1) Panel früh erzeugen (optional)
+setTimeout(renderPanel, 50);
+
+// 2) WICHTIG: Panel neu rendern, sobald Module registriert werden
+const _origRegister = Enh.registerModule;
+Enh.registerModule = function(def) {
+  _origRegister.call(Enh, def);
+  // UI aktualisieren, sobald ein Modul dazukommt
+  renderPanel();
+}
+  
+  
+  ;
 
   function loadState() {
     try {
