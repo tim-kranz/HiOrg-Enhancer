@@ -5,7 +5,7 @@
 
   window.HiOrgEnhancer?.registerModule({
     id: MOD_ID,
-    name: "WhatsApp (Dienste)",
+    name: "WhatsApp (Dienste) Test",
     defaultEnabled: true,
     match: (loc) => loc && (loc.pathname === "/einteilung_dienst.php" || loc.pathname === "/einteilung_dienst_positionen.php" || loc.pathname === "/einteilung_termin.php"),
     run: ({ norm }) => {
