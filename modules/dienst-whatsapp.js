@@ -5,9 +5,9 @@
 
   window.HiOrgEnhancer?.registerModule({
     id: MOD_ID,
-    name: "WhatsApp",
+    name: "WhatsApp (Dienste)",
     defaultEnabled: true,
-    match: (loc) => loc && (loc.pathname === "/einteilung_dienst.php" || loc.pathname === "/einteilung_dienst_positionen.php"),
+    match: (loc) => loc && (loc.pathname === "/einteilung_dienst.php" || loc.pathname === "/einteilung_dienst_positionen.php" || loc.pathname === "/einteilung_termin.php"),
     run: ({ norm }) => {
       const DEFAULT_CC = "+49";
       const PHONE_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;

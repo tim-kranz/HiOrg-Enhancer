@@ -33,6 +33,13 @@
     //   moduleIds: ["dienstWhatsApp", "formulareWhatsApp"],
     //   defaultEnabled: true
     // }
+
+     {
+      id: "whatsappAll",
+      name: "WhatsApp Bundle",
+      moduleIds: ["formulareWhatsApp"],
+      defaultEnabled: true
+    }
   ];
 
   function loadState() {
