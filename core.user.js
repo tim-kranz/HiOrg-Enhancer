@@ -344,3 +344,4 @@ Enh.registerModule = function registerModule(def) {
   renderPanel();
   runMatchingModules();
 })();
+})();

@@ -22,6 +22,15 @@
       function flipNameOrder(title) {
         const t = norm(title);
         if (!t) return null;
+
+        if (t.includes(",")) {
+          const [last, rest] = t.split(",");
+          const lastName = norm(last);
+          const firstName = norm(rest);
+          if (!firstName) return lastName || null;
+          return norm(`${firstName} ${lastName}`);
+        }
+
         const parts = t.split(" ");
         if (parts.length < 2) return t;
 
@@ -98,4 +107,3 @@
     }
   });
 })();
-))
