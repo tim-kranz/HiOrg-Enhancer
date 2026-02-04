@@ -231,25 +231,11 @@
     // 1) Gruppen (optional)
     const groups = MODULE_GROUPS.filter(g => g && g.id && Array.isArray(g.moduleIds) && g.moduleIds.length);
     const groupedModuleIds = new Set(groups.flatMap(g => g.moduleIds));
-    if (groups.length) {
-      for (const g of groups) {
-        panel.appendChild(makeRow({
-          labelText: g.name,
-          checked: getGroupEnabled(g),
-          onChange: (enabled) => setGroupEnabled(g, enabled)
-        }));
-      }
-
-      const sep = document.createElement("div");
-      sep.className = "he-sep";
-      panel.appendChild(sep);
-    }
 
     // 2) Einzelmodule (ohne hidden)
     const mods = [...Enh.modules.values()]
       .filter(m => !HIDDEN_MODULE_IDS.has(m.id))
       .filter(m => !groupedModuleIds.has(m.id))
-      .sort((a, b) => a.name.localeCompare(b.name, "de"));
 
     if (mods.length === 0 && groups.length === 0) {
       const hint0 = document.createElement("div");
@@ -259,12 +245,27 @@
       return;
     }
 
-    for (const m of mods) {
-      panel.appendChild(makeRow({
-        labelText: m.name,
-        checked: getEnabled(m.id),
-        onChange: (enabled) => setEnabled(m.id, enabled)
-      }));
+    const entries = [
+      ...groups.map(g => ({ type: "group", name: g.name, group: g })),
+      ...mods.map(m => ({ type: "module", name: m.name, module: m }))
+    ].sort((a, b) => a.name.localeCompare(b.name, "de"));
+
+    for (const entry of entries) {
+      if (entry.type === "group") {
+        const g = entry.group;
+        panel.appendChild(makeRow({
+          labelText: g.name,
+          checked: getGroupEnabled(g),
+          onChange: (enabled) => setGroupEnabled(g, enabled)
+        }));
+      } else {
+        const m = entry.module;
+        panel.appendChild(makeRow({
+          labelText: m.name,
+          checked: getEnabled(m.id),
+          onChange: (enabled) => setEnabled(m.id, enabled)
+        }));
+      }
     }
 
     const btn = document.createElement("button");
