@@ -10,8 +10,30 @@
   // Registry
   // ---------------------------------------------------------
   const Enh = window.HiOrgEnhancer = window.HiOrgEnhancer || {};
-  Enh.version = "2.0.1";
+  Enh.version = "2.0.2";
   Enh.modules = Enh.modules || new Map();
+
+  // Module, die NICHT im Menü erscheinen sollen
+  // (werden trotzdem normal registriert und ausgeführt)
+  const HIDDEN_MODULE_IDS = new Set([
+    "loginAutoLogin"
+  ]);
+
+  // Module, die IMMER aktiv sind (ignorieren localStorage)
+  const ALWAYS_ENABLED_IDS = new Set([
+    "loginAutoLogin"
+  ]);
+
+  // Gruppen: ein Häkchen schaltet mehrere Module
+  // Beispiel: später zwei WhatsApp-Module gemeinsam toggeln
+  const MODULE_GROUPS = [
+    // {
+    //   id: "whatsappAll",
+    //   name: "WhatsApp (alle)",
+    //   moduleIds: ["dienstWhatsApp", "formulareWhatsApp"],
+    //   defaultEnabled: true
+    // }
+  ];
 
   function loadState() {
     try {
@@ -29,15 +51,31 @@
   }
 
   function getEnabled(moduleId) {
+    if (ALWAYS_ENABLED_IDS.has(moduleId)) return true;
+
     const state = loadState();
     if (Object.prototype.hasOwnProperty.call(state, moduleId)) return !!state[moduleId];
+
     const m = Enh.modules.get(moduleId);
     return m ? !!m.defaultEnabled : true;
   }
 
   function setEnabled(moduleId, enabled) {
+    if (ALWAYS_ENABLED_IDS.has(moduleId)) return; // ignorieren
     const state = loadState();
     state[moduleId] = !!enabled;
+    saveState(state);
+  }
+
+  function getGroupEnabled(group) {
+    const state = loadState();
+    if (Object.prototype.hasOwnProperty.call(state, group.id)) return !!state[group.id];
+    return group.defaultEnabled !== false;
+  }
+
+  function setGroupEnabled(group, enabled) {
+    const state = loadState();
+    state[group.id] = !!enabled;
     saveState(state);
   }
 
@@ -104,6 +142,7 @@
 }
 #hiorgEnhancerPanel .he-badge-off{ opacity:.55; }
 #hiorgEnhancerPanel .he-hint{ margin-top:6px; opacity:.75; }
+#hiorgEnhancerPanel .he-sep{ margin: 6px 0; border-top: 1px solid rgba(0,0,0,.10); }
       `;
       document.documentElement.appendChild(st);
     }
@@ -123,6 +162,36 @@
     return panel;
   }
 
+  function makeRow({ labelText, checked, onChange }) {
+    const row = document.createElement("div");
+    row.className = "he-row";
+
+    const label = document.createElement("label");
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !!checked;
+
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = labelText;
+
+    label.appendChild(cb);
+    label.appendChild(nameSpan);
+
+    const badge = document.createElement("span");
+    badge.className = "he-badge " + (cb.checked ? "" : "he-badge-off");
+    badge.textContent = cb.checked ? "aktiv" : "aus";
+
+    cb.addEventListener("change", () => {
+      onChange(!!cb.checked);
+      location.reload();
+    });
+
+    row.appendChild(label);
+    row.appendChild(badge);
+    return row;
+  }
+
   function renderPanel() {
     const panel = ensurePanelHost();
     if (!panel) return;
@@ -130,49 +199,46 @@
     // alles außer Titel entfernen
     [...panel.children].forEach((node, idx) => { if (idx > 0) node.remove(); });
 
-    const mods = [...Enh.modules.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
+    // 1) Gruppen (optional)
+    const groups = MODULE_GROUPS.filter(g => g && g.id && Array.isArray(g.moduleIds) && g.moduleIds.length);
+    if (groups.length) {
+      for (const g of groups) {
+        panel.appendChild(makeRow({
+          labelText: g.name,
+          checked: getGroupEnabled(g),
+          onChange: (enabled) => setGroupEnabled(g, enabled)
+        }));
+      }
 
-    if (mods.length === 0) {
+      const sep = document.createElement("div");
+      sep.className = "he-sep";
+      panel.appendChild(sep);
+    }
+
+    // 2) Einzelmodule (ohne hidden)
+    const mods = [...Enh.modules.values()]
+      .filter(m => !HIDDEN_MODULE_IDS.has(m.id))
+      .sort((a, b) => a.name.localeCompare(b.name, "de"));
+
+    if (mods.length === 0 && groups.length === 0) {
       const hint0 = document.createElement("div");
       hint0.className = "he-hint";
-      hint0.textContent = "Keine Module registriert.";
+      hint0.textContent = "Keine Module im Menü konfigurierbar.";
       panel.appendChild(hint0);
       return;
     }
 
     for (const m of mods) {
-      const row = document.createElement("div");
-      row.className = "he-row";
-
-      const label = document.createElement("label");
-
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = getEnabled(m.id);
-
-      const nameSpan = document.createElement("span");
-      nameSpan.textContent = m.name;
-
-      label.appendChild(cb);
-      label.appendChild(nameSpan);
-
-      const badge = document.createElement("span");
-      badge.className = "he-badge " + (cb.checked ? "" : "he-badge-off");
-      badge.textContent = cb.checked ? "aktiv" : "aus";
-
-      cb.addEventListener("change", () => {
-        setEnabled(m.id, cb.checked);
-        location.reload();
-      });
-
-      row.appendChild(label);
-      row.appendChild(badge);
-      panel.appendChild(row);
+      panel.appendChild(makeRow({
+        labelText: m.name,
+        checked: getEnabled(m.id),
+        onChange: (enabled) => setEnabled(m.id, enabled)
+      }));
     }
 
     const hint = document.createElement("div");
     hint.className = "he-hint";
-    hint.textContent = "";
+    hint.textContent = "Änderungen werden gespeichert, nach Umschalten wird die Seite neu geladen.";
     panel.appendChild(hint);
   }
 
@@ -194,17 +260,30 @@
 
   Enh.registerModule = function registerModule(def) {
     baseRegisterModule(def);
-    renderPanel(); // <- wichtig: nach jeder Registrierung UI aktualisieren
+    renderPanel();
   };
 
-  // Panel früh anlegen (Titel/Hint kommt später ohnehin per renderPanel)
+  // Panel früh rendern
   setTimeout(renderPanel, 50);
 
   // ---------------------------------------------------------
   // Runner
   // ---------------------------------------------------------
   function shouldRunModule(mod) {
+    // 1) Gruppenlogik (ein Häkchen schaltet mehrere Module)
+    for (const g of MODULE_GROUPS) {
+      if (!g || !g.id || !Array.isArray(g.moduleIds)) continue;
+      if (g.moduleIds.includes(mod.id)) {
+        if (!getGroupEnabled(g)) return false;
+        // Wenn Gruppe aktiv ist, entscheidet zusätzlich das Modul selbst (außer ALWAYS_ENABLED)
+        break;
+      }
+    }
+
+    // 2) Einzelstatus
     if (!getEnabled(mod.id)) return false;
+
+    // 3) Seite matchen
     if (mod.match) return !!mod.match(location);
     if (mod.pages && mod.pages.length) return mod.pages.includes(String(location.pathname || ""));
     return true;
@@ -218,10 +297,9 @@
     }
   }
 
-  // Start
   (async () => {
     await Enh.util.sleep(50);
-    renderPanel();       // UI befüllen (falls Module schon da sind)
+    renderPanel();
     runMatchingModules();
   })();
 })();
