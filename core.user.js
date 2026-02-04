@@ -110,19 +110,20 @@
   // UI (ein Panel, immer re-renderbar)
   // ---------------------------------------------------------
   function ensurePanelHost() {
-    const box = document.querySelector("#menu_row_00");
-    if (!box) return null;
+  // Ziel: Panel oberhalb der ersten Accordion-Box "HiOrg-Server RKBN"
+  const wrap = document.querySelector("#menu_row_00_wrap");
+  if (!wrap) return null;
 
-    let panel = document.getElementById("hiorgEnhancerPanel");
-    if (panel) return panel;
+  let panel = document.getElementById("hiorgEnhancerPanel");
+  if (panel) return panel;
 
-    const styleId = "hiorgEnhancerStyle";
-    if (!document.getElementById(styleId)) {
-      const st = document.createElement("style");
-      st.id = styleId;
-      st.textContent = `
+  const styleId = "hiorgEnhancerStyle";
+  if (!document.getElementById(styleId)) {
+    const st = document.createElement("style");
+    st.id = styleId;
+    st.textContent = `
 #hiorgEnhancerPanel{
-  margin: 10px 0 6px 0;
+  margin: 0 0 8px 0;
   padding: 8px 8px 6px 8px;
   border: 1px solid rgba(0,0,0,.10);
   border-radius: 6px;
@@ -143,24 +144,23 @@
 #hiorgEnhancerPanel .he-badge-off{ opacity:.55; }
 #hiorgEnhancerPanel .he-hint{ margin-top:6px; opacity:.75; }
 #hiorgEnhancerPanel .he-sep{ margin: 6px 0; border-top: 1px solid rgba(0,0,0,.10); }
-      `;
-      document.documentElement.appendChild(st);
-    }
-
-    panel = document.createElement("div");
-    panel.id = "hiorgEnhancerPanel";
-
-    const title = document.createElement("div");
-    title.className = "he-title";
-    title.textContent = "HiOrg-Enhancer";
-    panel.appendChild(title);
-
-    const firstUl = box.querySelector("ul");
-    if (firstUl) firstUl.insertAdjacentElement("beforebegin", panel);
-    else box.appendChild(panel);
-
-    return panel;
+    `;
+    document.documentElement.appendChild(st);
   }
+
+  panel = document.createElement("div");
+  panel.id = "hiorgEnhancerPanel";
+
+  const title = document.createElement("div");
+  title.className = "he-title";
+  title.textContent = "HiOrg-Enhancer";
+  panel.appendChild(title);
+
+  // WICHTIG: oberhalb von "HiOrg-Server RKBN" einfügen
+  wrap.insertAdjacentElement("beforebegin", panel);
+
+  return panel;
+}
 
   function makeRow({ labelText, checked, onChange }) {
     const row = document.createElement("div");
