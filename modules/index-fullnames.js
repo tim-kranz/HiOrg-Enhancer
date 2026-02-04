@@ -16,8 +16,6 @@
         'td[class*="et_vstatus_"]'
       ].join(",");
 
-      console.info("[HiOrg-Enhancer] indexFullNames run", location.pathname);
-
       const DEBOUNCE_MS = 120;
       let timer = null;
 
