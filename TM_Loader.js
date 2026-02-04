@@ -11,20 +11,9 @@
 // @connect      fastly.jsdelivr.net
 // ==/UserScript==
 
-(async () => {
-  if (window.__hiorgEnhancerLoaded) return;
-  window.__hiorgEnhancerLoaded = 1;
-
-  const urlCb = new URLSearchParams(location.search).get("he_refresh");
-  const cb = urlCb ? Number(urlCb) : Math.floor(Date.now() / 6e5);
+(() => {
   const baseMainRaw = "https://raw.githubusercontent.com/tim-kranz/HiOrg-Enhancer/main";
   const baseMainCdn = "https://cdn.jsdelivr.net/gh/tim-kranz/HiOrg-Enhancer@7e1a773";
-
-  // Manifest enthält Reihenfolge + Dateinamen (core zuerst)
-  const manifestPaths = [
-    `${baseMainRaw}/manifest.json?_=${cb}`,
-    `${baseMainCdn}/manifest.json?_=${cb}`,
-  ];
 
   const get = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
@@ -62,43 +51,81 @@
     throw lastErr || new Error("all sources failed");
   }
 
-  // 1) Manifest laden
-  let manifest = null;
-  let manifestUrl = null;
-  try {
-    for (const u of manifestPaths) {
-      try {
-        manifest = await loadJson(u);
-        manifestUrl = u;
-        break;
-      } catch {}
-    }
-  } catch {}
-
-  if (!manifest || !Array.isArray(manifest.files) || manifest.files.length === 0) {
-    console.error("[HiOrg-Enhancer] Loader failed: manifest missing/invalid.");
-    return;
-  }
-
-  // 2) Dateien laden (Reihenfolge aus Manifest)
-  // Manifest-Dateien sind relativ zum Repo-Root.
-  const toCandidates = (relPath) => ([
-    `${baseMainRaw}/${relPath}?_=${cb}`,
-    `${baseMainCdn}/${relPath}?_=${cb}`,
-  ]);
-
-  for (const rel of manifest.files) {
-    const candidates = toCandidates(rel);
+  function resetRuntimeState() {
+    try { delete window.__hiorgEnhancerLoaded; } catch {}
+    try { delete window.__HiOrgEnhancerCoreLoaded; } catch {}
     try {
-      const { url, text } = await fetchTextWithFallback(candidates);
-      const cleaned = stripHeader(text) + `\n//# sourceURL=${url}`;
-      Function(cleaned)();
-      console.info("[HiOrg-Enhancer] loaded:", rel, "from", url);
-    } catch (e) {
-      console.error("[HiOrg-Enhancer] file load failed:", rel, e && e.message ? e.message : e);
-      return;
+      if (window.HiOrgEnhancer) {
+        window.HiOrgEnhancer.modules = new Map();
+        window.HiOrgEnhancer.__started = false;
+      }
+    } catch {}
+  }
+
+  async function loadEnhancer({ cacheBust = false, force = false } = {}) {
+    if (window.__hiorgEnhancerReloading) return;
+    window.__hiorgEnhancerReloading = true;
+
+    try {
+      if (window.__hiorgEnhancerLoaded && !force) return;
+      if (force) resetRuntimeState();
+      window.__hiorgEnhancerLoaded = 1;
+
+      const urlCb = new URLSearchParams(location.search).get("he_refresh");
+      const cb = cacheBust
+        ? Date.now()
+        : (urlCb ? Number(urlCb) : Math.floor(Date.now() / 6e5));
+
+      // Manifest enthält Reihenfolge + Dateinamen (core zuerst)
+      const manifestPaths = [
+        `${baseMainRaw}/manifest.json?_=${cb}`,
+        `${baseMainCdn}/manifest.json?_=${cb}`,
+      ];
+
+      // 1) Manifest laden
+      let manifest = null;
+      let manifestUrl = null;
+      for (const u of manifestPaths) {
+        try {
+          manifest = await loadJson(u);
+          manifestUrl = u;
+          break;
+        } catch {}
+      }
+
+      if (!manifest || !Array.isArray(manifest.files) || manifest.files.length === 0) {
+        console.error("[HiOrg-Enhancer] Loader failed: manifest missing/invalid.");
+        return;
+      }
+
+      // 2) Dateien laden (Reihenfolge aus Manifest)
+      // Manifest-Dateien sind relativ zum Repo-Root.
+      const toCandidates = (relPath) => ([
+        `${baseMainRaw}/${relPath}?_=${cb}`,
+        `${baseMainCdn}/${relPath}?_=${cb}`,
+      ]);
+
+      for (const rel of manifest.files) {
+        const candidates = toCandidates(rel);
+        try {
+          const { url, text } = await fetchTextWithFallback(candidates);
+          const cleaned = stripHeader(text) + `\n//# sourceURL=${url}`;
+          Function(cleaned)();
+          console.info("[HiOrg-Enhancer] loaded:", rel, "from", url);
+        } catch (e) {
+          console.error("[HiOrg-Enhancer] file load failed:", rel, e && e.message ? e.message : e);
+          return;
+        }
+      }
+
+      console.info("[HiOrg-Enhancer] all files loaded via manifest:", manifestUrl || "(unknown)");
+    } finally {
+      window.__hiorgEnhancerReloading = false;
     }
   }
 
-  console.info("[HiOrg-Enhancer] all files loaded via manifest:", manifestUrl || "(unknown)");
+  window.__HiOrgEnhancerReload = async ({ cacheBust = true } = {}) =>
+    loadEnhancer({ cacheBust, force: true });
+
+  void loadEnhancer();
 })();
