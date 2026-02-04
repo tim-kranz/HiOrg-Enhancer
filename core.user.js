@@ -108,6 +108,42 @@
       .trim();
   }
 
+  // ---------------------------------------------------------
+  // Dev-Only Modules (nur für bestimmte Nutzer sichtbar)
+  // ---------------------------------------------------------
+  const DEV_ONLY_USERNAMES = new Set([
+    "tim.kranz"
+  ]);
+
+  let cachedUserId = null;
+
+  function extractUserId(text) {
+    const match = norm(text).match(/([a-z0-9._-]+)\s*@/i);
+    return match ? match[1].toLowerCase() : null;
+  }
+
+  function getCurrentUserId() {
+    if (cachedUserId) return cachedUserId;
+
+    const candidates = [];
+    document.querySelectorAll("small").forEach((el) => {
+      const val = extractUserId(el.textContent || "");
+      if (val) candidates.push(val);
+    });
+
+    cachedUserId = candidates[0] || null;
+    return cachedUserId;
+  }
+
+  function isDevUser() {
+    const userId = getCurrentUserId();
+    return !!(userId && DEV_ONLY_USERNAMES.has(userId));
+  }
+
+  Enh.user = Enh.user || {};
+  Enh.user.getId = getCurrentUserId;
+  Enh.user.isDevUser = isDevUser;
+
   Enh.util = Enh.util || {};
   Enh.util.sleep = sleep;
   Enh.util.waitFor = waitFor;
@@ -236,6 +272,7 @@
     const mods = [...Enh.modules.values()]
       .filter(m => !HIDDEN_MODULE_IDS.has(m.id))
       .filter(m => !groupedModuleIds.has(m.id))
+      .filter(m => !m.devOnly || isDevUser())
 
     if (mods.length === 0 && groups.length === 0) {
       const hint0 = document.createElement("div");
@@ -309,6 +346,7 @@
       id: String(def.id),
       name: String(def.name || def.id),
       defaultEnabled: def.defaultEnabled !== false,
+      devOnly: !!def.devOnly,
       pages: Array.isArray(def.pages) ? def.pages.map(String) : null,
       match: typeof def.match === "function" ? def.match : null,
       run: def.run
@@ -338,6 +376,8 @@ Enh.registerModule = function registerModule(def) {
   // Runner
   // ---------------------------------------------------------
   function shouldRunModule(mod) {
+    if (mod.devOnly && !isDevUser()) return false;
+
     // 1) Gruppenlogik (ein Häkchen schaltet mehrere Module)
     for (const g of MODULE_GROUPS) {
       if (!g || !g.id || !Array.isArray(g.moduleIds)) continue;
