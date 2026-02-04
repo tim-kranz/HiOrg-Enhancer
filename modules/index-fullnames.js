@@ -8,7 +8,7 @@
     name: "Namen",
     defaultEnabled: true,
     pages: ["/index.php"],
-    run: ({ norm }) => {
+    run: ({ norm }) => { console.info("[HiOrg-Enhancer] indexFullNames run", location.pathname);
       const STATUS_CELL_SELECTOR = [
         "td.et_vstatus_voll",
         "td.et_vstatus_neutral",
@@ -98,3 +98,4 @@
     }
   });
 })();
+))

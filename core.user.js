@@ -238,7 +238,7 @@
 
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = "Cache löschen & neu laden";
+    btn.textContent = "Reload";
     btn.style.marginTop = "6px";
     btn.style.width = "100%";
     btn.addEventListener("click", () => hardRefreshFromGithub());
@@ -254,7 +254,7 @@
   try {
     // 1) Modul-States zurücksetzen
     localStorage.removeItem("hiorgEnhancer.moduleState.v1");
-
+    
     // 2) optionale weitere Keys, falls du später mehr speicherst
     // localStorage.removeItem("hiorgEnhancer.someOtherKey");
 
