@@ -5,15 +5,20 @@
 
   window.HiOrgEnhancer?.registerModule({
     id: MOD_ID,
-    name: "WhatsApp (Formulare)",
+    name: "WhatsApp (Formulare) v2",
     defaultEnabled: true,
     pages: ["/formulare.php"],
     run: ({ norm }) => {
       const DEFAULT_CC = "+49";
+      const PHONE_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+      const MAX_PARALLEL_FETCHES = 2;
 
       const WA_CLASS = "hiorg-wa-btn";
       const WA_DISABLED_CLASS = "hiorg-wa-disabled";
       const WA_OK_CLASS = "hiorg-wa-ok";
+
+      const HELPER_TABLE_HEADER_RX = /(helfer|name|mitglied)/i;
+      const HELPER_LIST_RX = /(helfer|dienst)/i;
 
       if (!document.getElementById("hiorg-wa-style")) {
         const style = document.createElement("style");
@@ -28,6 +33,7 @@
   margin-left:6px;
   vertical-align:middle;
   cursor:pointer;
+  color:#4a4a4a;
 }
 .${WA_CLASS} svg{ width:16px; height:16px; display:block; }
 .${WA_DISABLED_CLASS}{ cursor:not-allowed; opacity:.45; }
@@ -36,9 +42,53 @@
         document.documentElement.appendChild(style);
       }
 
+      function cacheGet(key) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) return { hit: false, value: null };
+          const obj = JSON.parse(raw);
+          if (!obj || typeof obj !== "object") return { hit: false, value: null };
+          if (typeof obj.ts !== "number") return { hit: false, value: null };
+          if (Date.now() - obj.ts > PHONE_CACHE_TTL_MS) return { hit: false, value: null };
+          return { hit: true, value: ("value" in obj) ? obj.value : null };
+        } catch {
+          return { hit: false, value: null };
+        }
+      }
+
+      function cacheSet(key, value) {
+        try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), value: value ?? null })); } catch {}
+      }
+
+      function isMobileNumber(rawPhone) {
+        const raw = norm(rawPhone);
+        if (!raw) return false;
+
+        let s = raw.replace(/[^\d+]/g, "");
+        if (!s) return false;
+
+        if (s.startsWith("00")) s = "+" + s.slice(2);
+
+        if (s.startsWith("+")) {
+          const digits = s.slice(1).replace(/\D/g, "");
+          const ccDigits = DEFAULT_CC.replace(/\D/g, "");
+          if (digits.startsWith(ccDigits)) {
+            s = "0" + digits.slice(ccDigits.length);
+          } else {
+            s = digits;
+          }
+        } else {
+          s = s.replace(/\D/g, "");
+        }
+
+        return s.startsWith("01");
+      }
+
       function toWhatsAppDigits(rawPhone) {
         const raw = norm(rawPhone);
         if (!raw) return null;
+
+        if (!isMobileNumber(raw)) return null;
 
         let s = raw.replace(/[^\d+]/g, "");
         if (!s) return null;
@@ -61,6 +111,20 @@
         return digits.length >= 6 ? digits : null;
       }
 
+      function extractInputValue(html, field) {
+        const patterns = [
+          new RegExp(`<input[^>]*\\bid=["']${field}["'][^>]*\\bvalue=["']([^"']*)["'][^>]*>`, "i"),
+          new RegExp(`<input[^>]*\\bname=["']${field}["'][^>]*\\bvalue=["']([^"']*)["'][^>]*>`, "i")
+        ];
+
+        for (const pattern of patterns) {
+          const match = html.match(pattern);
+          if (match) return norm(match[1]);
+        }
+
+        return "";
+      }
+
       function svgWhatsApp(disabled) {
         return `
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="${disabled ? "opacity:.45" : ""}">
@@ -68,95 +132,260 @@
 </svg>`;
       }
 
-      // konservativ für DE-Mobilnummern
-      const PHONE_RX = /(?:(?:\+|00)\s*49|0)\s*(?:1[5-7]\d)\s*(?:[\d\s\/-]{5,})\d/g;
-
-      function isInside(el, selector) {
-        return !!(el && el.closest && el.closest(selector));
+      let active = 0;
+      const queue = [];
+      function limit(fn) {
+        return new Promise((resolve, reject) => {
+          queue.push({ fn, resolve, reject });
+          pump();
+        });
+      }
+      function pump() {
+        while (active < MAX_PARALLEL_FETCHES && queue.length) {
+          const job = queue.shift();
+          active++;
+          Promise.resolve()
+            .then(job.fn)
+            .then(job.resolve, job.reject)
+            .finally(() => { active--; pump(); });
+        }
       }
 
-      function buildButton(rawPhone) {
-        const digits = toWhatsAppDigits(rawPhone);
+      async function fetchHandyFromAdresse(uid) {
+        const cacheKey = `hiorg_phone_${uid}`;
+        const cached = cacheGet(cacheKey);
+        if (cached.hit) return cached.value;
+
+        const url = `/adresse.php?user_id=${encodeURIComponent(uid)}`;
+        const resp = await fetch(url, { credentials: "include" });
+        if (!resp.ok) { cacheSet(cacheKey, null); return null; }
+
+        const html = await resp.text();
+
+        const fields = ["handy", "telpriv", "teldienst"];
+        const candidates = fields.map((field) => extractInputValue(html, field)).filter(Boolean);
+
+        let phone = "";
+        let digits = null;
+        for (const candidate of candidates) {
+          phone = candidate;
+          digits = toWhatsAppDigits(candidate);
+          if (digits) break;
+        }
+
+        if (!phone && candidates.length) {
+          phone = candidates[0];
+        }
+
+        const result = {
+          phone: phone || null,
+          digits: digits || null
+        };
+
+        cacheSet(cacheKey, result);
+        return result;
+      }
+
+      function normalizeText(text) {
+        return norm(text || "").replace(/\s+/g, " ").trim();
+      }
+
+      function escapeRegExp(value) {
+        return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      }
+
+      function buildNameKeys(text) {
+        const cleaned = normalizeText(text)
+          .replace(/\([^)]*\)/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!cleaned) return [];
+
+        const withoutComma = cleaned.replace(/,/g, " ").replace(/\s+/g, " ").trim();
+        const parts = withoutComma.split(" ").filter(Boolean);
+        const keys = new Set();
+
+        if (parts.length >= 2) {
+          const first = parts[0];
+          const last = parts[parts.length - 1];
+          keys.add(`${last} ${first}`);
+          keys.add(`${first} ${last}`);
+        }
+
+        keys.add(withoutComma);
+
+        return Array.from(keys).map((key) => normalizeText(key));
+      }
+
+      async function fetchMemberMap() {
+        const resp = await fetch("/adrliste.php?fm=1", { credentials: "include" });
+        if (!resp.ok) return new Map();
+
+        const html = await resp.text();
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const rows = doc.querySelectorAll("#adrlisttable tbody tr[role='row']");
+        const map = new Map();
+
+        rows.forEach((row) => {
+          const uid = row.querySelector("input[name='userIds[]']")?.value;
+          if (!uid) return;
+
+          const nameCell = row.querySelector("td:nth-child(2)");
+          const firstNameCell = row.querySelector("td:nth-child(3)");
+
+          const dataText = normalizeText(nameCell?.getAttribute("data-text") || nameCell?.dataset?.text || "");
+          const firstName = normalizeText(firstNameCell?.textContent || "");
+
+          if (!dataText) return;
+
+          let lastName = dataText;
+          if (firstName) {
+            const rx = new RegExp(`\\b${escapeRegExp(firstName)}\\b`, "i");
+            lastName = normalizeText(dataText.replace(rx, " "));
+          }
+
+          const keyLastFirst = normalizeText(`${lastName} ${firstName}`.trim());
+          const keyFirstLast = normalizeText(`${firstName} ${lastName}`.trim());
+
+          const keys = [dataText, keyLastFirst, keyFirstLast].filter(Boolean);
+          keys.forEach((key) => {
+            if (key && !map.has(key)) {
+              map.set(key, uid);
+            }
+          });
+        });
+
+        return map;
+      }
+
+      let memberMapPromise = null;
+      function getMemberMap() {
+        if (!memberMapPromise) memberMapPromise = fetchMemberMap();
+        return memberMapPromise;
+      }
+
+      function svgButton(disabled) {
         const btn = document.createElement("span");
         btn.className = WA_CLASS;
-        btn.innerHTML = svgWhatsApp(!digits);
-
-        if (digits) {
-          btn.classList.add(WA_OK_CLASS);
-          btn.title = `WhatsApp öffnen (${rawPhone})`;
-          btn.addEventListener("click", (ev) => {
-            ev.preventDefault();
-            ev.stopPropagation();
-            window.open(`https://wa.me/${encodeURIComponent(digits)}`, "_blank", "noopener,noreferrer");
-          });
-        } else {
+        btn.innerHTML = svgWhatsApp(disabled);
+        if (disabled) {
           btn.classList.add(WA_DISABLED_CLASS);
-          btn.title = `Keine WhatsApp-geeignete Nummer (${rawPhone})`;
         }
         return btn;
       }
 
-      function replacePhonesInTextNode(textNode) {
-        const text = textNode.nodeValue || "";
-        if (!PHONE_RX.test(text)) return;
-        PHONE_RX.lastIndex = 0;
+      function getHelperNodesFromTables() {
+        const nodes = new Set();
+        document.querySelectorAll("table").forEach((table) => {
+          const headerCells = table.querySelectorAll("thead th");
+          const headerRow = headerCells.length ? headerCells : table.querySelectorAll("tr th");
+          if (!headerRow.length) return;
 
-        const frag = document.createDocumentFragment();
-        let last = 0;
-        let m;
-
-        while ((m = PHONE_RX.exec(text)) !== null) {
-          const start = m.index;
-          const end = start + m[0].length;
-          const rawPhone = norm(m[0]);
-
-          if (start > last) frag.appendChild(document.createTextNode(text.slice(last, start)));
-
-          const phoneSpan = document.createElement("span");
-          phoneSpan.textContent = text.slice(start, end);
-          frag.appendChild(phoneSpan);
-          frag.appendChild(buildButton(rawPhone));
-
-          last = end;
-        }
-
-        if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
-
-        textNode.parentNode.replaceChild(frag, textNode);
-      }
-
-      function scan() {
-        const walker = document.createTreeWalker(
-          document.body,
-          NodeFilter.SHOW_TEXT,
-          {
-            acceptNode(node) {
-              const p = node.parentElement;
-              if (!p) return NodeFilter.FILTER_REJECT;
-
-              if (isInside(p, "script,style,textarea,pre,code")) return NodeFilter.FILTER_REJECT;
-              if (isInside(p, `.${WA_CLASS}`)) return NodeFilter.FILTER_REJECT;
-
-              const t = (node.nodeValue || "").trim();
-              if (!t) return NodeFilter.FILTER_REJECT;
-
-              return PHONE_RX.test(t) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+          const nameIndices = [];
+          headerRow.forEach((th, index) => {
+            if (HELPER_TABLE_HEADER_RX.test(normalizeText(th.textContent))) {
+              nameIndices.push(index);
             }
-          }
-        );
+          });
+          if (!nameIndices.length) return;
 
-        const nodes = [];
-        let n;
-        while ((n = walker.nextNode())) nodes.push(n);
-        nodes.forEach(replacePhonesInTextNode);
+          const rows = table.querySelectorAll("tbody tr");
+          rows.forEach((row) => {
+            const cells = Array.from(row.children);
+            nameIndices.forEach((idx) => {
+              const cell = cells[idx];
+              if (cell) nodes.add(cell);
+            });
+          });
+        });
+        return nodes;
       }
 
-      scan();
+      function getHelperNodesFromLists() {
+        const nodes = new Set();
+        document.querySelectorAll("ul,ol").forEach((list) => {
+          const key = `${list.id} ${list.className}`;
+          if (!HELPER_LIST_RX.test(key)) return;
+          list.querySelectorAll("li").forEach((li) => nodes.add(li));
+        });
+        return nodes;
+      }
+
+      function getHelperNodesFallback() {
+        const nodes = new Set();
+        document.querySelectorAll("[data-helfer],[data-helper]").forEach((el) => nodes.add(el));
+        return nodes;
+      }
+
+      function gatherHelperNodes() {
+        const nodes = new Set();
+        getHelperNodesFromTables().forEach((node) => nodes.add(node));
+        getHelperNodesFromLists().forEach((node) => nodes.add(node));
+        getHelperNodesFallback().forEach((node) => nodes.add(node));
+        return Array.from(nodes);
+      }
+
+      async function ensureButton(node) {
+        if (!node || node.querySelector(`.${WA_CLASS}`)) return;
+
+        const nameText = normalizeText(node.textContent || "");
+        if (!nameText) return;
+
+        const nameKeys = buildNameKeys(nameText);
+        if (!nameKeys.length) return;
+
+        const memberMap = await getMemberMap();
+        let uid = null;
+        for (const key of nameKeys) {
+          uid = memberMap.get(key);
+          if (uid) break;
+        }
+        if (!uid) return;
+
+        const btn = svgButton(true);
+        btn.title = "WhatsApp laden";
+        node.appendChild(btn);
+
+        limit(async () => {
+          const result = await fetchHandyFromAdresse(uid);
+          const phone = result?.phone ?? null;
+          const digits = result?.digits ?? null;
+
+          if (digits) {
+            btn.classList.remove(WA_DISABLED_CLASS);
+            btn.classList.add(WA_OK_CLASS);
+            btn.innerHTML = svgWhatsApp(false);
+            btn.title = `WhatsApp öffnen (${phone})`;
+            btn.addEventListener("click", (ev) => {
+              ev.preventDefault();
+              ev.stopPropagation();
+              window.open(`https://wa.me/${encodeURIComponent(digits)}`, "_blank", "noopener,noreferrer");
+            });
+          } else {
+            btn.classList.remove(WA_OK_CLASS);
+            btn.classList.add(WA_DISABLED_CLASS);
+            btn.innerHTML = svgWhatsApp(true);
+            btn.title = phone ? `Keine WhatsApp-geeignete Nummer (${phone})` : "Keine Handynummer hinterlegt";
+          }
+        }).catch(() => {
+          btn.classList.remove(WA_OK_CLASS);
+          btn.classList.add(WA_DISABLED_CLASS);
+          btn.innerHTML = svgWhatsApp(true);
+          btn.title = "Nummer konnte nicht geladen werden";
+        });
+      }
+
+      function scanAndAttach() {
+        const nodes = gatherHelperNodes();
+        nodes.forEach((node) => ensureButton(node));
+      }
+
+      scanAndAttach();
 
       const obs = new MutationObserver((muts) => {
         for (const m of muts) {
           if (m.type === "childList" && (m.addedNodes?.length || 0) > 0) {
-            scan();
+            scanAndAttach();
             break;
           }
         }
