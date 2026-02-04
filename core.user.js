@@ -288,10 +288,21 @@
     });
   }
 
-  Enh.registerModule = function registerModule(def) {
-    baseRegisterModule(def);
-    renderPanel();
-  };
+Enh.__started = Enh.__started || false;
+
+Enh.registerModule = function registerModule(def) {
+  baseRegisterModule(def);
+  renderPanel();
+
+  // NEU: wenn Core schon läuft, direkt dieses Modul starten
+  if (Enh.__started && def && def.id) {
+    const mod = Enh.modules.get(String(def.id));
+    if (mod && shouldRunModule(mod)) {
+      try { mod.run(Enh.util); }
+      catch (e) { console.warn("[HiOrg-Enhancer] module crashed (late-run):", mod.id, e); }
+    }
+  }
+};
 
   // Panel früh rendern
   setTimeout(renderPanel, 50);
@@ -327,9 +338,9 @@
     }
   }
 
-  (async () => {
-    await Enh.util.sleep(50);
-    renderPanel();
-    runMatchingModules();
-  })();
+(async () => {
+  await Enh.util.sleep(50);
+  Enh.__started = true;   // NEU
+  renderPanel();
+  runMatchingModules();
 })();
