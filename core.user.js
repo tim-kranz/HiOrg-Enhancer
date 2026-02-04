@@ -37,7 +37,7 @@
      {
       id: "whatsappAll",
       name: "WhatsApp",
-      moduleIds: ["formulareWhatsApp"],
+      moduleIds: ["dienstWhatsApp"],
       defaultEnabled: true
     }
   ];
