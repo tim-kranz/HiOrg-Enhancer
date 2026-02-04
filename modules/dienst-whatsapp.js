@@ -265,7 +265,7 @@
       }
 
       function ensureStdlisteButton(row) {
-        const uid = row.getAttribute("row-id") || row.querySelector("input.id")?.value || "";
+        const uid = row.querySelector("input.id")?.value || "";
         const anchor = row.querySelector("td a[href^='stunden.php?helferidstd=']");
         const cell = anchor?.closest("td") || row.querySelector("td");
         if (!cell) return;
