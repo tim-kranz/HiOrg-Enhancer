@@ -34,6 +34,7 @@
   margin-left:6px;
   vertical-align:middle;
   cursor:pointer;
+  color:#4a4a4a;
 }
 .${WA_CLASS} svg{ width:16px; height:16px; display:block; }
 .${WA_DISABLED_CLASS}{ cursor:not-allowed; opacity:.45; }
