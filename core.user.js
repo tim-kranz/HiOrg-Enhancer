@@ -217,7 +217,7 @@
     });
 
     row.appendChild(label);
-    row.appendChild(badge);
+    // row.appendChild(badge);
     return row;
   }
 
