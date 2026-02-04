@@ -209,7 +209,7 @@
 
     const badge = document.createElement("span");
     badge.className = "he-badge " + (cb.checked ? "" : "he-badge-off");
-    badge.textContent = cb.checked ? "aktiv" : "aus";
+    badge.textContent = cb.checked ? "on" : "off";
 
     cb.addEventListener("change", () => {
       onChange(!!cb.checked);
