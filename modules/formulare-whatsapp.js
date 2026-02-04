@@ -5,7 +5,7 @@
 
   window.HiOrgEnhancer?.registerModule({
     id: MOD_ID,
-    name: "Formulare: WhatsApp-Icon neben Nummern",
+    name: "WhatsApp (Formulare)",
     defaultEnabled: true,
     pages: ["/formulare.php"],
     run: ({ norm }) => {
