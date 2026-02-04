@@ -2,6 +2,7 @@
   "files": [
     "core.user.js",
     "modules/index-fullnames.js",
-    "modules/login-autologin.js"
+    "modules/login-autologin.js",
+    "modules/dienst-whatsapp.js"
   ]
 }
