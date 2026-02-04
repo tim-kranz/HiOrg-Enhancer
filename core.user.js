@@ -238,7 +238,7 @@
 
     const hint = document.createElement("div");
     hint.className = "he-hint";
-    hint.textContent = "Änderungen werden gespeichert, nach Umschalten wird die Seite neu geladen.";
+    hint.textContent = "";
     panel.appendChild(hint);
   }
 
