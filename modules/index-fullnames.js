@@ -19,7 +19,7 @@
       const DEBOUNCE_MS = 120;
       let timer = null;
 
-      function flipNameOrder(title) {
+      function flipNameOrder(title, shortName) {
         const t = norm(title);
         if (!t) return null;
 
@@ -33,6 +33,30 @@
 
         const parts = t.split(" ");
         if (parts.length < 2) return t;
+
+        const shortNorm = norm(shortName).replace(/\s+/g, "");
+        if (shortNorm.length >= 2) {
+          const lastPrefix = shortNorm.slice(0, -1).toLocaleLowerCase();
+          const firstInitial = shortNorm.slice(-1).toLocaleLowerCase();
+          const normalizeToken = (token) => token.replace(/[^\p{L}]/gu, "");
+
+          for (let splitAt = 1; splitAt < parts.length; splitAt += 1) {
+            const firstNameParts = parts.slice(splitAt);
+            const lastNameParts = parts.slice(0, splitAt);
+            const firstToken = normalizeToken(firstNameParts[0] || "");
+            const lastToken = normalizeToken(lastNameParts[0] || "");
+
+            if (!firstToken || !lastToken) continue;
+            if (lastPrefix && lastToken.slice(0, lastPrefix.length).toLocaleLowerCase() !== lastPrefix) {
+              continue;
+            }
+            if (firstToken[0].toLocaleLowerCase() !== firstInitial) continue;
+
+            const firstName = firstNameParts.join(" ");
+            const lastName = lastNameParts.join(" ");
+            return norm(`${firstName} ${lastName}`);
+          }
+        }
 
         const lastName = parts[0];
         const firstName = parts.slice(1).join(" ");
@@ -56,7 +80,7 @@
         spans.forEach((sp) => {
           if (!shouldProcessSpan(sp)) return;
 
-          const fullName = flipNameOrder(sp.getAttribute("title"));
+          const fullName = flipNameOrder(sp.getAttribute("title"), sp.textContent);
           if (!fullName) return;
 
           if (!sp.dataset.hiorgShort) sp.dataset.hiorgShort = norm(sp.textContent);
