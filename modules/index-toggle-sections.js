@@ -57,14 +57,15 @@
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = BTN_CLASS;
-        btn.setAttribute("aria-expanded", "true");
-        btn.textContent = "Ausblenden";
+        btn.setAttribute("aria-expanded", "false");
+        btn.textContent = "Ausklappen";
         btn.addEventListener("click", () => {
           const collapsed = contentEl.classList.contains(COLLAPSED_CLASS);
           setCollapsed(contentEl, btn, !collapsed);
         });
 
         headingEl.appendChild(btn);
+        setCollapsed(contentEl, btn, true);
       }
 
       function apply() {
