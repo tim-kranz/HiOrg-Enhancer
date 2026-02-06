@@ -16,12 +16,12 @@
   // Module, die NICHT im Menü erscheinen sollen
   // (werden trotzdem normal registriert und ausgeführt)
   const HIDDEN_MODULE_IDS = new Set([
-    "loginAutoLogin"
+    "loginAutoLogin", "indexToggleSections"
   ]);
 
   // Module, die IMMER aktiv sind (ignorieren localStorage)
   const ALWAYS_ENABLED_IDS = new Set([
-    "loginAutoLogin"
+    "loginAutoLogin", "indexToggleSections"
   ]);
 
   // Gruppen: ein Häkchen schaltet mehrere Module
@@ -412,3 +412,4 @@ Enh.registerModule = function registerModule(def) {
   runMatchingModules();
 })();
 })();
+
