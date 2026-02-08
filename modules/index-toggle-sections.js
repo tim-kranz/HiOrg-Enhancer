@@ -54,18 +54,20 @@
         if (headingEl.getAttribute(SECTION_MARKER) === "1") return;
         headingEl.setAttribute(SECTION_MARKER, "1");
 
+        const params = new URLSearchParams(window.location.search);
+        const startCollapsed = !params.has("more_realzeit");
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = BTN_CLASS;
-        btn.setAttribute("aria-expanded", "false");
-        btn.textContent = "Ausklappen";
+        btn.setAttribute("aria-expanded", String(!startCollapsed));
+        btn.textContent = startCollapsed ? "Ausklappen" : "Ausblenden";
         btn.addEventListener("click", () => {
           const collapsed = contentEl.classList.contains(COLLAPSED_CLASS);
           setCollapsed(contentEl, btn, !collapsed);
         });
 
         headingEl.appendChild(btn);
-        setCollapsed(contentEl, btn, true);
+        setCollapsed(contentEl, btn, startCollapsed);
       }
 
       function apply() {
