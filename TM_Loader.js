@@ -1,12 +1,10 @@
 // ==UserScript==
 // @name         HiOrg-Enhancer Loader
 // @namespace    https://github.com/tim-kranz/HiOrg-Enhancer
-// @version      1.2.0
+// @version      1.1.0
 // @match        https://www.hiorg-server.de/*
 // @match        https://hiorg-server.de/*
 // @run-at       document-idle
-// @grant        GM_getValue
-// @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @connect      raw.githubusercontent.com
 // @connect      cdn.jsdelivr.net
@@ -16,12 +14,6 @@
 (() => {
   const baseMainRaw = "https://raw.githubusercontent.com/tim-kranz/HiOrg-Enhancer/main";
   const baseMainCdn = "https://cdn.jsdelivr.net/gh/tim-kranz/HiOrg-Enhancer@7e1a773";
-  const loaderRaw = `${baseMainRaw}/TM_Loader.js`;
-  const loaderCdn = `${baseMainCdn}/TM_Loader.js`;
-  const loaderUpdateIntervalMs = 30 * 24 * 60 * 60 * 1000;
-  const loaderUpdateKey = "hiorgEnhancerLoaderLastUpdate";
-  const loaderScriptKey = "hiorgEnhancerLoaderScript";
-  const loaderScriptUrlKey = "hiorgEnhancerLoaderScriptUrl";
 
   const get = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
@@ -57,54 +49,6 @@
       catch (e) { lastErr = e; }
     }
     throw lastErr || new Error("all sources failed");
-  }
-
-  async function maybeUpdateLoader() {
-    if (window.__hiorgEnhancerLoaderUsingCache) return false;
-    if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") return false;
-
-    const now = Date.now();
-    const lastUpdate = Number(GM_getValue(loaderUpdateKey, 0)) || 0;
-    const cachedScript = GM_getValue(loaderScriptKey, "");
-    const cachedUrl = GM_getValue(loaderScriptUrlKey, loaderRaw);
-    const isFresh = cachedScript && lastUpdate && (now - lastUpdate < loaderUpdateIntervalMs);
-
-    if (isFresh) {
-      try {
-        window.__hiorgEnhancerLoaderUsingCache = true;
-        Function(stripHeader(cachedScript) + `\n//# sourceURL=${cachedUrl}`)();
-        return true;
-      } catch {
-        window.__hiorgEnhancerLoaderUsingCache = false;
-      }
-    }
-
-    if (now - lastUpdate >= loaderUpdateIntervalMs) {
-      try {
-        const { url, text } = await fetchTextWithFallback([loaderRaw, loaderCdn]);
-        if (text) {
-          GM_setValue(loaderUpdateKey, now);
-          GM_setValue(loaderScriptKey, text);
-          GM_setValue(loaderScriptUrlKey, url);
-        }
-      } catch (e) {
-        console.warn("[HiOrg-Enhancer] loader update failed:", e && e.message ? e.message : e);
-      }
-    }
-
-    const refreshedScript = GM_getValue(loaderScriptKey, "");
-    if (refreshedScript) {
-      try {
-        window.__hiorgEnhancerLoaderUsingCache = true;
-        const refreshedUrl = GM_getValue(loaderScriptUrlKey, loaderRaw);
-        Function(stripHeader(refreshedScript) + `\n//# sourceURL=${refreshedUrl}`)();
-        return true;
-      } catch {
-        window.__hiorgEnhancerLoaderUsingCache = false;
-      }
-    }
-
-    return false;
   }
 
   function resetRuntimeState() {
@@ -183,8 +127,5 @@
   window.__HiOrgEnhancerReload = async ({ cacheBust = true } = {}) =>
     loadEnhancer({ cacheBust, force: true });
 
-  void maybeUpdateLoader().then((usedCache) => {
-    if (usedCache) return;
-    void loadEnhancer();
-  });
+  void loadEnhancer();
 })();
