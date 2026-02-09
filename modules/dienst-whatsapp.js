@@ -18,6 +18,7 @@
     run: ({ norm }) => {
       const DEFAULT_CC = "+49";
       const PHONE_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+      const MISSING_PHONE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
       const MAX_PARALLEL_FETCHES = 2;
 
       const LIST_ROOT_SELS = ["#et_helferlisten", "#et_posbox_freie", "#et_posbox_fest", "#et_posbox_meld", "#et_posbox_abs", "#et_posbox_zu"];
@@ -53,6 +54,13 @@
         document.documentElement.appendChild(style);
       }
 
+      function isMissingPhone(value) {
+        if (!value || typeof value !== "object") return true;
+        const phone = value.phone ?? null;
+        const digits = value.digits ?? null;
+        return !phone && !digits;
+      }
+
       function cacheGet(key) {
         try {
           const raw = localStorage.getItem(key);
@@ -60,8 +68,10 @@
           const obj = JSON.parse(raw);
           if (!obj || typeof obj !== "object") return { hit: false, value: null };
           if (typeof obj.ts !== "number") return { hit: false, value: null };
-          if (Date.now() - obj.ts > PHONE_CACHE_TTL_MS) return { hit: false, value: null };
-          return { hit: true, value: ("value" in obj) ? obj.value : null };
+          const value = ("value" in obj) ? obj.value : null;
+          const ttl = isMissingPhone(value) ? MISSING_PHONE_CACHE_TTL_MS : PHONE_CACHE_TTL_MS;
+          if (Date.now() - obj.ts > ttl) return { hit: false, value: null };
+          return { hit: true, value };
         } catch {
           return { hit: false, value: null };
         }
