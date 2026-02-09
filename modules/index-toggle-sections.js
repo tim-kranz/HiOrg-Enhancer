@@ -35,11 +35,13 @@
       const sections = [
         {
           heading: "Bitte machen Sie Angaben zu folgenden Diensten und Terminen:",
-          matchContent: (el) => el && el.tagName === "FIELDSET"
+          matchContent: (el) => el && el.tagName === "FIELDSET",
+          shouldStartCollapsed: (params) => !params.has("more_realzeit")
         },
         {
           heading: "Bitte Helferstunden eintragen:",
-          matchContent: (el) => el && el.tagName === "TABLE"
+          matchContent: (el) => el && el.tagName === "TABLE",
+          shouldStartCollapsed: () => true
         }
       ];
 
@@ -49,13 +51,15 @@
         button.textContent = collapsed ? "Ausklappen" : "Ausblenden";
       }
 
-      function setupSection(headingEl, contentEl) {
+      function setupSection(headingEl, contentEl, config) {
         if (!headingEl || !contentEl) return;
         if (headingEl.getAttribute(SECTION_MARKER) === "1") return;
         headingEl.setAttribute(SECTION_MARKER, "1");
 
         const params = new URLSearchParams(window.location.search);
-        const startCollapsed = !params.has("more_realzeit");
+        const startCollapsed = config.shouldStartCollapsed
+          ? config.shouldStartCollapsed(params)
+          : true;
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = BTN_CLASS;
@@ -83,7 +87,7 @@
           }
           if (!next) return;
 
-          setupSection(heading, next);
+          setupSection(heading, next, config);
         });
       }
 
