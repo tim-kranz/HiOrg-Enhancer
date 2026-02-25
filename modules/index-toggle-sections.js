@@ -42,6 +42,11 @@
           heading: "Bitte Helferstunden eintragen:",
           matchContent: (el) => el && el.tagName === "TABLE",
           shouldStartCollapsed: () => true
+        },
+        {
+          heading: "Termin als Ausbildung in der Helferkartei speichern:",
+          matchContent: (el) => el && el.tagName === "TABLE",
+          shouldStartCollapsed: () => true
         }
       ];
 
