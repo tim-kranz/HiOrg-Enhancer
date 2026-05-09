@@ -15,8 +15,11 @@
     run: ({ norm }) => {
       const CHART_ID = "hiorg-dienst-gantt";
       const STYLE_ID = "hiorg-dienst-gantt-style";
-      const RESCUE_QUAL_RE = /^(san|rs|ra|nfs|notsan|rettsan|rettass)$/i;
-      const QUAL_RE = /\b(RA|RS|San|He|EKA|ZF|NFS|NotSan|RettSan|RettAss)\b/g;
+      const QUALIFIED_RE = /^(san|rs|ra|nfs|notsan|rettsan|rettass)$/i;
+      const LISTS = [
+        { selector: "#et_posbox_fest, #eingeteilte-personen", status: "fest", title: "Eingeteilt" },
+        { selector: "#et_posbox_meld, #gemeldete-personen", status: "gemeldet", title: "Gemeldet" }
+      ];
 
       if (window.__HiOrgDienstGanttRunning) return;
       window.__HiOrgDienstGanttRunning = true;
@@ -91,15 +94,10 @@
           if (ev.target && ev.target.matches("input, select")) debounced();
         }, true);
 
-        for (const rootInfo of findPersonListRoots()) {
+        const roots = LISTS.map((cfg) => document.querySelector(cfg.selector)).filter(Boolean);
+        for (const root of roots) {
           const obs = new MutationObserver(debounced);
-          obs.observe(rootInfo.root, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
-        }
-
-        const requirementsTable = document.getElementById("et_ap_liste");
-        if (requirementsTable) {
-          const obs = new MutationObserver(debounced);
-          obs.observe(requirementsTable, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-soll"] });
+          obs.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
         }
       }
 
@@ -107,18 +105,16 @@
         const dienst = readDienst();
         if (!dienst) return;
 
-        const requirements = readRequirements();
         const helpers = readHelpers(dienst);
-        const coverageRows = requirements
-          .filter((req) => !req.max && req.target > 0)
-          .map((req) => ({ req, segments: buildCoverage(dienst, helpers, req) }));
-        const complete = coverageRows.length > 0 && coverageRows.every((row) => row.segments.every((seg) => seg.count >= row.req.target));
+        const soll = readSollSanitaeter() || 2;
+        const coverage = buildCoverage(dienst, helpers, soll);
+        const complete = coverage.length > 0 && coverage.every((seg) => seg.count >= soll);
 
         const chart = ensureChartHost();
         if (!chart) return;
 
         chart.innerHTML = "";
-        chart.appendChild(buildHeader(dienst, helpers, requirements, coverageRows, complete));
+        chart.appendChild(buildHeader(dienst, helpers, soll, complete));
 
         if (!helpers.length) {
           const empty = document.createElement("div");
@@ -129,7 +125,7 @@
         }
 
         chart.appendChild(buildLegend());
-        chart.appendChild(buildChart(dienst, helpers, coverageRows));
+        chart.appendChild(buildChart(dienst, helpers, coverage, soll));
       }
 
       function ensureChartHost() {
@@ -139,15 +135,16 @@
         chart = document.createElement("section");
         chart.id = CHART_ID;
 
-        const firstList = findPersonListRoots()[0];
-        const anchor = firstList?.root || document.querySelector("main")?.firstElementChild || document.body.firstElementChild;
+        const firstList = document.querySelector("#et_posbox_fest, #eingeteilte-personen")
+          || [...document.querySelectorAll("fieldset, section, h2")].find((el) => /eingeteilte|helfer/i.test(el.textContent || ""));
+        const anchor = firstList || document.querySelector("main")?.firstElementChild || document.body.firstElementChild;
         if (!anchor || !anchor.parentNode) return null;
 
         anchor.parentNode.insertBefore(chart, anchor);
         return chart;
       }
 
-      function buildHeader(dienst, helpers, requirements, coverageRows, complete) {
+      function buildHeader(dienst, helpers, soll, complete) {
         const head = document.createElement("div");
         head.className = "hg-head";
 
@@ -160,11 +157,8 @@
         const fest = helpers.filter((h) => h.status === "fest").length;
         const gemeldet = helpers.filter((h) => h.status === "gemeldet").length;
         summary.appendChild(pill(`${helpers.length} Personen (${fest} fest, ${gemeldet} gemeldet)`));
-        requirements.forEach((req) => summary.appendChild(pill(`${req.label}: ${req.max ? "max. " : ""}${req.target}`)));
-        if (!requirements.length) summary.appendChild(pill("Keine Besetzungsanforderung erkannt", "warn"));
-        if (coverageRows.length) {
-          summary.appendChild(pill(complete ? "durchgehend vollständig" : "Lücken vorhanden", complete ? "ok" : "bad"));
-        }
+        summary.appendChild(pill(`Soll San/RD: ${soll}`));
+        summary.appendChild(pill(complete ? "durchgehend vollständig" : "Lücken vorhanden", complete ? "ok" : "bad"));
 
         head.appendChild(title);
         head.appendChild(summary);
@@ -183,7 +177,7 @@
         return legend;
       }
 
-      function buildChart(dienst, helpers, coverageRows) {
+      function buildChart(dienst, helpers, coverage, soll) {
         const outer = document.createElement("div");
         outer.className = "hg-chart";
         const grid = document.createElement("div");
@@ -205,10 +199,23 @@
         grid.appendChild(label);
         grid.appendChild(time);
 
-        for (const row of coverageRows) {
-          grid.appendChild(buildCoverageLabel(row.req));
-          grid.appendChild(buildCoverageTrack(dienst, row.req, row.segments));
+        const coverageLabel = document.createElement("div");
+        coverageLabel.className = "hg-row-label hg-coverage-label";
+        coverageLabel.innerHTML = `San/RD-Abdeckung<div class="hg-meta">benötigt: ${soll} gleichzeitig</div>`;
+        const coverageTrack = document.createElement("div");
+        coverageTrack.className = "hg-row-track hg-coverage-track";
+        coverageTrack.style.backgroundSize = `${100 / Math.max(1, Math.ceil((dienst.end - dienst.start) / 60))}% 100%`;
+        for (const seg of coverage) {
+          const el = document.createElement("div");
+          el.className = `hg-segment ${seg.count >= soll ? "hg-segment-ok" : "hg-segment-bad"}`;
+          el.style.left = `${percent(dienst, seg.start)}%`;
+          el.style.width = `${Math.max(.5, percentWidth(dienst, seg.start, seg.end))}%`;
+          el.title = `${minutesToLabel(seg.start)} - ${minutesToLabel(seg.end)} Uhr: ${seg.count}/${soll}`;
+          el.textContent = `${seg.count}/${soll}`;
+          coverageTrack.appendChild(el);
         }
+        grid.appendChild(coverageLabel);
+        grid.appendChild(coverageTrack);
 
         for (const helper of helpers) {
           grid.appendChild(buildHelperLabel(helper));
@@ -217,31 +224,6 @@
 
         outer.appendChild(grid);
         return outer;
-      }
-
-      function buildCoverageLabel(req) {
-        const label = document.createElement("div");
-        label.className = "hg-row-label hg-coverage-label";
-        label.innerHTML = `<span></span><div class="hg-meta"></div>`;
-        label.querySelector("span").textContent = `${req.label}-Abdeckung`;
-        label.querySelector(".hg-meta").textContent = `benötigt: ${req.target} gleichzeitig`;
-        return label;
-      }
-
-      function buildCoverageTrack(dienst, req, segments) {
-        const track = document.createElement("div");
-        track.className = "hg-row-track hg-coverage-track";
-        track.style.backgroundSize = `${100 / Math.max(1, Math.ceil((dienst.end - dienst.start) / 60))}% 100%`;
-        for (const seg of segments) {
-          const el = document.createElement("div");
-          el.className = `hg-segment ${seg.count >= req.target ? "hg-segment-ok" : "hg-segment-bad"}`;
-          el.style.left = `${percent(dienst, seg.start)}%`;
-          el.style.width = `${Math.max(.5, percentWidth(dienst, seg.start, seg.end))}%`;
-          el.title = `${minutesToLabel(seg.start)} - ${minutesToLabel(seg.end)} Uhr: ${seg.count}/${req.target}`;
-          el.textContent = `${seg.count}/${req.target}`;
-          track.appendChild(el);
-        }
-        return track;
       }
 
       function buildHelperLabel(helper) {
@@ -291,34 +273,17 @@
 
       function readHelpers(dienst) {
         const helpers = [];
-        for (const rootInfo of findPersonListRoots()) {
-          const items = rootInfo.root.matches("li") ? [rootInfo.root] : [...rootInfo.root.querySelectorAll("li[data-uid], li.helfer, li")];
-          for (const li of items) {
-            if (li.closest(`#${CHART_ID}`)) continue;
-            const helper = readHelper(li, rootInfo.status, dienst);
-            if (helper) helpers.push(helper);
-          }
+        for (const cfg of LISTS) {
+          document.querySelectorAll(cfg.selector).forEach((root) => {
+            const items = root.matches("li") ? [root] : [...root.querySelectorAll("li[data-uid], li.helfer, li")];
+            for (const li of items) {
+              if (li.closest(`#${CHART_ID}`)) continue;
+              const helper = readHelper(li, cfg.status, dienst);
+              if (helper) helpers.push(helper);
+            }
+          });
         }
         return helpers.sort((a, b) => a.start - b.start || a.end - b.end || a.name.localeCompare(b.name, "de"));
-      }
-
-      function findPersonListRoots() {
-        const roots = [];
-        const addRoot = (root, status) => {
-          if (!root || root.closest?.(`#${CHART_ID}`) || roots.some((entry) => entry.root === root)) return;
-          roots.push({ root, status });
-        };
-
-        document.querySelectorAll("#et_posbox_fest, #eingeteilte-personen").forEach((root) => addRoot(root, "fest"));
-        document.querySelectorAll("#et_posbox_meld, #gemeldete-personen").forEach((root) => addRoot(root, "gemeldet"));
-
-        document.querySelectorAll("fieldset, section").forEach((root) => {
-          const title = norm(root.querySelector("legend, h2")?.textContent || "");
-          if (/eingeteilte\s+personen/i.test(title)) addRoot(root, "fest");
-          if (/gemeldete\s+personen/i.test(title)) addRoot(root, "gemeldet");
-        });
-
-        return roots;
       }
 
       function readHelper(li, status, dienst) {
@@ -333,9 +298,9 @@
           name,
           status,
           quals,
-          positionIds: readPositionIds(li),
           start: times.start,
           end: times.end,
+          qualified: quals.some((q) => QUALIFIED_RE.test(q)),
           u18: note === "U18",
           note
         };
@@ -344,44 +309,24 @@
       function readName(li) {
         const explicit = li.querySelector(".name, .helfer-name, .username, a[href*='adresse.php']");
         if (explicit) {
-          const val = cleanName(explicit.textContent || "");
+          const val = norm(explicit.textContent || "");
           if (looksLikeName(val)) return val;
-        }
-
-        const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT, {
-          acceptNode: (node) => {
-            const parent = node.parentElement;
-            if (!parent || parent.closest(`#${CHART_ID}`)) return NodeFilter.FILTER_REJECT;
-            if (parent.matches("input, button, select, textarea, script, style")) return NodeFilter.FILTER_REJECT;
-            if (parent.closest("button, select, textarea, .hiorg-wa-btn")) return NodeFilter.FILTER_REJECT;
-            return NodeFilter.FILTER_ACCEPT;
-          }
-        });
-
-        let node = walker.nextNode();
-        while (node) {
-          const val = cleanName(node.nodeValue || "");
-          if (looksLikeName(val)) return val;
-          node = walker.nextNode();
         }
 
         const clone = li.cloneNode(true);
         clone.querySelectorAll("input, button, select, textarea, svg, img, .hiorg-wa-btn").forEach((el) => el.remove());
-        const text = norm(clone.innerText || clone.textContent || "");
-        const beforeQual = cleanName(text.split(/\b(?:RA|RS|San|He|EKA|ZF|NFS|NotSan|RettSan|RettAss)\b/)[0] || "");
-        if (looksLikeName(beforeQual)) return beforeQual;
-        return "";
-      }
-
-      function cleanName(text) {
-        return norm(text).replace(/^[○●◯\s-]+/, "").replace(/\s+/g, " ").trim();
+        const lines = (clone.innerText || clone.textContent || "")
+          .split(/\n|\s{2,}/)
+          .map(norm)
+          .filter(Boolean);
+        return lines.find(looksLikeName) || "";
       }
 
       function looksLikeName(text) {
         return /^[\p{L}][\p{L}' .-]{2,}$/u.test(text)
           && !/^(RA|RS|San|He|EKA|ZF|NFS|NotSan|RettSan|RettAss)$/i.test(text)
           && !/\d{1,2}:\d{2}/.test(text)
-          && !/^(von|bis|ändern|liste|externe|einteilen)$/i.test(text);
+          && !/^(von|bis|ändern|liste|externe)$/i.test(text);
       }
 
       function readHelperTimes(li, dienst) {
@@ -391,7 +336,7 @@
             const value = norm(input.value || input.getAttribute("value") || "");
             const placeholder = norm(input.getAttribute("placeholder") || "");
             return ["", "text", "time"].includes(type)
-              && (/^\d{1,2}:\d{2}$/.test(value) || /^\d{1,2}:\d{2}$/.test(placeholder) || /^(von|bis)$/i.test(placeholder) || /^(von|bis)$/i.test(value) || input.size <= 8);
+              && (/^\d{1,2}:\d{2}$/.test(value) || /^\d{1,2}:\d{2}$/.test(placeholder) || /^(von|bis)$/i.test(placeholder) || input.size <= 8);
           });
         const values = inputs.slice(-2).map((input) => norm(input.value || input.getAttribute("value") || ""));
         const start = timeToMinutes(values[0]) ?? dienst.start;
@@ -405,201 +350,24 @@
       function readQuals(li) {
         const quals = new Set();
         const text = norm(li.innerText || li.textContent || "");
-        (text.match(QUAL_RE) || []).forEach((qual) => quals.add(qual));
-        li.querySelectorAll(".qualiblock:not(.placeholder)").forEach((el) => {
-          const value = norm(el.textContent || "");
-          if (looksLikeQualification(value)) quals.add(value);
-        });
+        const matches = text.match(/\b(RA|RS|San|He|EKA|ZF|NFS|NotSan|RettSan|RettAss)\b/g) || [];
+        for (const match of matches) quals.add(match);
         return [...quals];
       }
 
-      function readPositionIds(li) {
-        return [...li.classList]
-          .map((className) => className.match(/^ap_(\d+)$/)?.[1] || null)
-          .filter(Boolean);
-      }
-
-      function extractQualsFromText(text) {
-        const quals = new Set(text.match(QUAL_RE) || []);
-        const genericMatches = norm(text).match(/\b[\p{L}][\p{L}0-9+.-]{1,12}\b/gu) || [];
-        genericMatches.filter(looksLikeQualification).forEach((qual) => quals.add(qual));
-        return [...quals];
-      }
-
-      function looksLikeQualification(text) {
-        return /^[\p{L}][\p{L}0-9+.-]{1,12}$/u.test(text)
-          && !/^(von|bis|Filter|Qualifikation|Qualifizierte|Sonstige|Personen|Person|Helfer|Helferin|min|max|fest|gemeldet|unter|keine|passende|Position)$/i.test(text)
-          && !/^\d+$/.test(text);
-      }
-
-      function readRequirements() {
-        const assignmentRequirements = readRequirementsFromAssignmentTable();
-        if (assignmentRequirements.length) return assignmentRequirements;
-
-        const requirements = [];
-        const add = (req) => {
-          if (!req || !req.label || !req.target || req.target < 1) return;
-          const key = req.label.toLowerCase();
-          if (requirements.some((existing) => existing.label.toLowerCase() === key)) return;
-          requirements.push({ ...req, quals: req.quals?.length ? req.quals : inferRequirementQuals(req.label) });
-        };
-
-        readRequirementsFromTables().forEach(add);
-        readRequirementsFromSummary().forEach(add);
-        return requirements;
-      }
-
-      function readRequirementsFromAssignmentTable() {
-        const table = document.getElementById("et_ap_liste");
-        if (!table) return [];
-
-        const requirements = [];
-        table.querySelectorAll("tbody.status_komplett > tr").forEach((row) => {
-          const target = Number(row.dataset.soll || "") || readTargetFromCountCell(row.querySelector("td"));
-          const cells = [...row.children];
-          const labelText = norm(cells.slice(1).map((cell) => cell.textContent || "").join(" "));
-          const isQualifiedSum = /Qualifizierte/i.test(labelText);
-          const isOtherMax = /Sonstige/i.test(labelText);
-          const isMax = isOtherMax || /\(max\.\)|max\.|Praktikant/i.test(norm(row.textContent || "") + " " + [...row.querySelectorAll("[title]")].map((el) => el.getAttribute("title") || "").join(" "));
-
-          if (!target && !isOtherMax) return;
-
-          if (isQualifiedSum) {
-            requirements.push({
-              label: "Qualifizierte",
-              target,
-              max: false,
-              kind: "qualified",
-              quals: inferRequirementQuals("Qualifizierte")
-            });
-            return;
-          }
-
-          if (isOtherMax) {
-            if (target) {
-              requirements.push({ label: "Sonstige", target, max: true, kind: "other", quals: [] });
-            }
-            return;
-          }
-
-          if (!row.classList.contains("et_ap_entry")) return;
-
-          const quals = readRequirementQuals(row);
-          const driver = norm(cells[cells.length - 1]?.textContent || "");
-          const labelParts = quals.length ? [quals.join("/")] : ["Position"];
-          if (driver) labelParts.push(`FS ${driver}`);
-
-          requirements.push({
-            label: labelParts.join(" + "),
-            target,
-            max: isMax,
-            kind: "position",
-            apId: row.getAttribute("data-apid") || "",
-            quals,
-            driver
-          });
-        });
-
-        const minPositionIds = requirements
-          .filter((req) => req.kind === "position" && !req.max && req.apId)
-          .map((req) => req.apId);
-        requirements.forEach((req) => {
-          if (req.kind === "qualified" && minPositionIds.length) req.apIds = minPositionIds;
-        });
-
-        return dedupeRequirements(requirements);
-      }
-
-      function readRequirementQuals(row) {
-        return [...row.querySelectorAll(".qualiblock:not(.placeholder)")]
-          .map((el) => norm(el.textContent || ""))
-          .filter(Boolean);
-      }
-
-      function readTargetFromCountCell(cell) {
-        const text = norm(cell?.textContent || "");
-        return Number(text.match(/\/\s*(\d+)/)?.[1] || 0);
-      }
-
-      function dedupeRequirements(requirements) {
-        const seen = new Set();
-        return requirements.filter((req) => {
-          const key = [req.kind || "", req.apId || "", req.label, req.target, req.max ? "max" : "min"].join(":").toLowerCase();
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-      }
-
-      function readRequirementsFromTables() {
-        const result = [];
-        document.querySelectorAll("tr").forEach((row) => {
+      function readSollSanitaeter() {
+        const rows = [...document.querySelectorAll("tr")];
+        for (const row of rows) {
           const cells = [...row.querySelectorAll("td, th")].map((cell) => norm(cell.textContent || ""));
-          if (cells.length < 2 || /Anforderung/i.test(cells[0])) return;
-          const label = cells[0];
-          const sollText = cells[2] || cells.find((cell) => /(?:max\.)?\s*\d+/.test(cell)) || "";
-          const target = Number(sollText.match(/\d+/)?.[0] || 0);
-          if (!target || /^(Ist|Soll|Status)$/i.test(label)) return;
-          result.push({ label: shortenRequirementLabel(label), target, max: /max\.?/i.test(sollText) || /max\.?/i.test(label), quals: extractQualsFromText(label) });
-        });
-        return result;
-      }
-
-      function readRequirementsFromSummary() {
-        const result = [];
-        const seen = new Set();
-        const nodes = [...document.querySelectorAll("body *")]
-          .filter((el) => {
-            const text = norm(el.textContent || "");
-            return !el.closest(`#${CHART_ID}`) && text.length <= 300 && /\/\s*\d+|\(min\.\)|\(max\.\)/i.test(text);
-          });
-
-        for (const el of nodes) {
-          const text = norm(el.textContent || "");
-          const target = Number(text.match(/\/\s*(\d+)/)?.[1] || 0);
-          if (!target) continue;
-
-          const quals = extractQualsFromText(text).filter((q) => !/^He$/i.test(q));
-          const label = /Qualifiz/i.test(text)
-            ? "Qualifizierte"
-            : (quals.length ? quals.join("/") : "Besetzung");
-          const key = `${label}:${target}`.toLowerCase();
-          if (seen.has(key)) continue;
-          seen.add(key);
-          result.push({ label, target, quals, max: /max\.?/i.test(text) });
+          if (!cells.length || !/Sanit(ä|ae)?ter/i.test(cells.join(" "))) continue;
+          const sollCell = cells[2] || cells.find((cell) => /^\d+$/.test(cell));
+          const value = Number((sollCell || "").match(/\d+/)?.[0] || 0);
+          if (value > 0) return value;
         }
-
-        document.querySelectorAll("body *").forEach((el) => {
-          const ownText = norm([...el.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.nodeValue || "").join(" "));
-          if (!/Qualifiz|Sonstige/i.test(ownText)) return;
-          const row = el.closest("tr") || el.parentElement;
-          const rowText = norm(row?.textContent || "");
-          const target = Number(rowText.match(/\/\s*(\d+)/)?.[1] || rowText.match(/\b(?:max\.)?\s*(\d+)\b/i)?.[1] || 0);
-          if (!target) return;
-          const label = /Sonstige/i.test(ownText) ? "Sonstige" : "Qualifizierte";
-          const key = `${label}:${target}`.toLowerCase();
-          if (seen.has(key)) return;
-          seen.add(key);
-          result.push({ label, target, max: /max\.?/i.test(rowText) || /Sonstige/i.test(ownText) });
-        });
-
-        return result;
+        return null;
       }
 
-      function shortenRequirementLabel(label) {
-        if (/Sanit/i.test(label)) return "San/RD";
-        if (/Qualifiz/i.test(label)) return "Qualifizierte";
-        if (/Sonstige/i.test(label)) return "Sonstige";
-        return label;
-      }
-
-      function inferRequirementQuals(label) {
-        if (/San|Qualifiz/i.test(label)) return ["San", "RS", "RA", "NFS", "NotSan", "RettSan", "RettAss"];
-        const quals = extractQualsFromText(label);
-        return quals.length ? quals : [];
-      }
-
-      function buildCoverage(dienst, helpers, req) {
+      function buildCoverage(dienst, helpers, soll) {
         const points = new Set([dienst.start, dienst.end]);
         helpers.forEach((helper) => {
           points.add(helper.start);
@@ -611,25 +379,15 @@
           const start = sorted[i];
           const end = sorted[i + 1];
           if (end <= start) continue;
-          const count = helpers.filter((helper) => matchesRequirement(helper, req) && helper.start <= start && helper.end >= end).length;
+          const count = helpers.filter((helper) => helper.qualified && helper.start <= start && helper.end >= end).length;
           const previous = segments[segments.length - 1];
-          if (previous && previous.count === count && (previous.count >= req.target) === (count >= req.target)) {
+          if (previous && previous.count === count && (previous.count >= soll) === (count >= soll)) {
             previous.end = end;
           } else {
             segments.push({ start, end, count });
           }
         }
         return segments;
-      }
-
-      function matchesRequirement(helper, req) {
-        if (req.apId) return helper.positionIds.includes(req.apId);
-        if (req.kind === "qualified" || /Qualifiz/i.test(req.label)) {
-          if (req.apIds?.length) return helper.positionIds.some((apId) => req.apIds.includes(apId));
-          return helper.quals.some((qual) => RESCUE_QUAL_RE.test(qual));
-        }
-        if (!req.quals?.length) return true;
-        return helper.quals.some((qual) => req.quals.some((needed) => qual.toLowerCase() === needed.toLowerCase()));
       }
 
       function buildTicks(dienst) {
