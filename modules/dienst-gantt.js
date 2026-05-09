@@ -17,8 +17,8 @@
       const STYLE_ID = "hiorg-dienst-gantt-style";
       const QUALIFIED_RE = /^(san|rs|ra|nfs|notsan|rettsan|rettass)$/i;
       const LISTS = [
-        { selector: "#et_posbox_fest, #eingeteilte-personen", status: "fest", title: "Eingeteilt" },
-        { selector: "#et_posbox_meld, #gemeldete-personen", status: "gemeldet", title: "Gemeldet" }
+        { selector: "#einteilung_fest, #et_posbox_fest, #eingeteilte-personen", status: "fest", title: "Eingeteilt" },
+        { selector: "#einteilung_meld, #et_posbox_meld, #gemeldete-personen", status: "gemeldet", title: "Gemeldet" }
       ];
 
       if (window.__HiOrgDienstGanttRunning) return;
@@ -94,10 +94,19 @@
           if (ev.target && ev.target.matches("input, select")) debounced();
         }, true);
 
-        const roots = LISTS.map((cfg) => document.querySelector(cfg.selector)).filter(Boolean);
+        const roots = [
+          ...LISTS.map((cfg) => document.querySelector(cfg.selector)).filter(Boolean),
+          document.querySelector("#et_helferlisten")
+        ].filter(Boolean);
         for (const root of roots) {
           const obs = new MutationObserver(debounced);
-          obs.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
+          const isListWrapper = root.id === "et_helferlisten";
+          obs.observe(root, {
+            childList: true,
+            subtree: !isListWrapper,
+            attributes: !isListWrapper,
+            attributeFilter: isListWrapper ? undefined : ["class", "style"]
+          });
         }
       }
 
@@ -135,7 +144,7 @@
         chart = document.createElement("section");
         chart.id = CHART_ID;
 
-        const firstList = document.querySelector("#et_posbox_fest, #eingeteilte-personen")
+        const firstList = document.querySelector("#einteilung_fest, #et_posbox_fest, #eingeteilte-personen")
           || [...document.querySelectorAll("fieldset, section, h2")].find((el) => /eingeteilte|helfer/i.test(el.textContent || ""));
         const anchor = firstList || document.querySelector("main")?.firstElementChild || document.body.firstElementChild;
         if (!anchor || !anchor.parentNode) return null;
@@ -356,15 +365,60 @@
       }
 
       function readSollSanitaeter() {
-        const rows = [...document.querySelectorAll("tr")];
+        const requirementTable = document.querySelector("#et_ap_liste");
+
+        const qualifiedSumRow = requirementTable?.querySelector("tbody.status_summe tr[data-soll]");
+        if (qualifiedSumRow && /Qualifizierte\s*\(min\.\)/i.test(qualifiedSumRow.textContent || "")) {
+          const value = readSollValue(qualifiedSumRow);
+          if (value > 0) return value;
+        }
+
+        const medicalRows = requirementTable
+          ? [...requirementTable.querySelectorAll("tbody.status_q1 tr[data-soll]")]
+          : [];
+        for (const row of medicalRows) {
+          const text = norm(row.textContent || "");
+          const titles = [...row.querySelectorAll(".qualiblock[title]")].map((el) => norm(el.getAttribute("title") || "")).join(" ");
+          if (!/(Sanit|Rettung|Notfall|\bSan\b|\bRS\b|\bRA\b|NotSan|NFS)/i.test(`${text} ${titles}`)) continue;
+          const value = readSollValue(row);
+          if (value > 0) return value;
+        }
+
+        const positionRows = requirementTable
+          ? [...requirementTable.querySelectorAll("tbody.status_komplett:not(.status_summe) tr.et_ap_entry[data-soll]")]
+          : [];
+        const positionSum = positionRows.reduce((sum, row) => {
+          if (!isQualifiedRequirementRow(row)) return sum;
+          return sum + readSollValue(row);
+        }, 0);
+        if (positionSum > 0) return positionSum;
+
+        const rows = [...document.querySelectorAll("tr[data-soll], tr")];
         for (const row of rows) {
-          const cells = [...row.querySelectorAll("td, th")].map((cell) => norm(cell.textContent || ""));
-          if (!cells.length || !/Sanit(ä|ae)?ter/i.test(cells.join(" "))) continue;
-          const sollCell = cells[2] || cells.find((cell) => /^\d+$/.test(cell));
-          const value = Number((sollCell || "").match(/\d+/)?.[0] || 0);
+          const text = norm(row.textContent || "");
+          const titles = [...row.querySelectorAll("[title]")].map((el) => norm(el.getAttribute("title") || "")).join(" ");
+          if (!/(Sanit|Rettung|Notfall|Qualifizierte\s*\(min\.\)|\bSan\b|\bRS\b|\bRA\b|NotSan|NFS)/i.test(`${text} ${titles}`)) continue;
+          const value = readSollValue(row);
           if (value > 0) return value;
         }
         return null;
+      }
+
+      function isQualifiedRequirementRow(row) {
+        if (!row) return false;
+        const text = norm(row.textContent || "");
+        const titles = [...row.querySelectorAll("[title]")].map((el) => norm(el.getAttribute("title") || "")).join(" ");
+        if (/Praktikant|Sonstige\s*\(max\.\)|Erste Hilfe/i.test(`${text} ${titles}`)) return false;
+        return /(Sanit|Rettung|Notfall|\bSan\b|\bRS\b|\bRA\b|NotSan|NFS)/i.test(`${text} ${titles}`);
+      }
+
+      function readSollValue(row) {
+        const dataSoll = Number(row?.getAttribute("data-soll") || 0);
+        if (dataSoll > 0) return dataSoll;
+        const statusText = norm(row?.querySelector("td:first-child, th:first-child")?.textContent || "");
+        const fraction = statusText.match(/\b\d+\s*\/\s*(\d+)\b/);
+        if (fraction) return Number(fraction[1]);
+        return 0;
       }
 
       function buildCoverage(dienst, helpers, soll) {
