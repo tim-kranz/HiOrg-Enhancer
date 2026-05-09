@@ -15,7 +15,23 @@
     run: ({ norm }) => {
       const CHART_ID = "hiorg-dienst-gantt";
       const STYLE_ID = "hiorg-dienst-gantt-style";
-      const QUALIFIED_RE = /^(san|rs|ra|nfs|notsan|rettsan|rettass)$/i;
+      const MEDICAL_QUALIFICATIONS = [
+        { rank: 0, patterns: [/keine\s+med\.?\s+qualifikation/i, /keine\s+medizinische\s+qualifikation/i] },
+        { rank: 1, patterns: [/erste\s+hilfe/i, /^eh$/i, /^he$/i] },
+        { rank: 2, patterns: [/eka(?:\s+san)?/i] },
+        { rank: 3, patterns: [/sanit[aä]ter/i, /^san$/i] },
+        { rank: 4, patterns: [/rettungshelfer/i, /^rh$/i] },
+        { rank: 5, patterns: [/rettungssanit[aä]ter/i, /^rs$/i, /^rettsan$/i] },
+        { rank: 6, patterns: [/rettungsassistent/i, /^ra$/i, /^rettass$/i] },
+        { rank: 7, patterns: [/notfallsanit[aä]ter/i, /^nfs$/i, /^notsan$/i] },
+        { rank: 8, patterns: [/arzt|[aä]rztin/i] },
+        { rank: 9, patterns: [/notarzt|not[aä]rztin/i] }
+      ];
+      const TACTICAL_QUALIFICATIONS = [
+        { rank: 1, patterns: [/gruppenf[uü]hrer/i, /^gf$/i] },
+        { rank: 2, patterns: [/zugf[uü]hrer/i, /^zf$/i] },
+        { rank: 3, patterns: [/verbands?f[uü]hrer/i, /^vf$/i] }
+      ];
       const LISTS = [
         { selector: "#einteilung_fest, #et_posbox_fest, #eingeteilte-personen", status: "fest", title: "Eingeteilt" },
         { selector: "#einteilung_meld, #et_posbox_meld, #gemeldete-personen", status: "gemeldet", title: "Gemeldet" }
@@ -60,18 +76,20 @@
 #${CHART_ID} .hg-dot-meld{ background:#f59e0b; }
 #${CHART_ID} .hg-dot-ok{ background:#22c55e; }
 #${CHART_ID} .hg-dot-bad{ background:#ef4444; }
-#${CHART_ID} .hg-chart{ overflow-x:auto; padding-bottom:2px; }
-#${CHART_ID} .hg-grid{ display:grid; grid-template-columns:minmax(190px, 260px) minmax(620px, 1fr); gap:0; min-width:840px; }
+#${CHART_ID} .hg-chart{ overflow-x:visible; padding-bottom:2px; width:100%; }
+#${CHART_ID} .hg-grid{ display:grid; grid-template-columns:minmax(140px, 24%) minmax(0, 1fr); gap:0; width:100%; min-width:0; }
 #${CHART_ID} .hg-label, #${CHART_ID} .hg-time, #${CHART_ID} .hg-row-label, #${CHART_ID} .hg-row-track{ border-bottom:1px solid #eef2f6; }
 #${CHART_ID} .hg-label{ padding:0 10px 8px 0; font-weight:700; color:#53616f; }
 #${CHART_ID} .hg-time{ position:relative; height:30px; }
 #${CHART_ID} .hg-tick{ position:absolute; top:0; bottom:0; width:1px; background:#dde5ed; }
 #${CHART_ID} .hg-tick strong{ position:absolute; top:0; left:4px; transform:translateX(-50%); padding:0 3px; background:#fff; color:#53616f; font-size:12px; font-weight:600; white-space:nowrap; }
+#${CHART_ID} .hg-tick:first-child strong{ left:0; transform:none; }
+#${CHART_ID} .hg-tick:last-child strong{ left:auto; right:0; transform:none; }
 #${CHART_ID} .hg-row-label{ min-height:44px; padding:8px 10px 8px 0; }
-#${CHART_ID} .hg-name{ font-weight:700; line-height:1.15; }
+#${CHART_ID} .hg-name{ font-weight:700; line-height:1.15; overflow-wrap:anywhere; }
 #${CHART_ID} .hg-meta{ margin-top:3px; color:#66788a; font-size:12px; line-height:1.25; }
 #${CHART_ID} .hg-row-track{ position:relative; min-height:44px; padding:9px 0; background:linear-gradient(to right, rgba(221,229,237,.65) 1px, transparent 1px); }
-#${CHART_ID} .hg-bar{ position:absolute; top:9px; height:24px; border-radius:7px; overflow:hidden; color:#fff; font-size:12px; line-height:24px; padding:0 8px; white-space:nowrap; text-overflow:ellipsis; box-shadow:inset 0 -1px 0 rgba(0,0,0,.18); }
+#${CHART_ID} .hg-bar{ position:absolute; top:9px; height:24px; border-radius:7px; overflow:hidden; color:#fff; font-size:12px; line-height:24px; padding:0 6px; white-space:nowrap; text-overflow:ellipsis; box-shadow:inset 0 -1px 0 rgba(0,0,0,.18); }
 #${CHART_ID} .hg-bar-fest{ background:#2563eb; }
 #${CHART_ID} .hg-bar-gemeldet{ background:#f59e0b; color:#1f2933; }
 #${CHART_ID} .hg-bar-u18{ background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.0), rgba(255,255,255,.0) 6px, rgba(255,255,255,.28) 6px, rgba(255,255,255,.28) 12px); }
@@ -115,15 +133,19 @@
         if (!dienst) return;
 
         const helpers = readHelpers(dienst);
-        const soll = readSollSanitaeter() || 2;
-        const coverage = buildCoverage(dienst, helpers, soll);
-        const complete = coverage.length > 0 && coverage.every((seg) => seg.count >= soll);
+        const requirements = readRequirements();
+        const coverageRows = requirements.map((requirement) => ({
+          requirement,
+          coverage: buildCoverage(dienst, helpers, requirement)
+        }));
+        const complete = coverageRows.length > 0
+          && coverageRows.every((row) => row.coverage.length > 0 && row.coverage.every((seg) => seg.count >= row.requirement.count));
 
         const chart = ensureChartHost();
         if (!chart) return;
 
         chart.innerHTML = "";
-        chart.appendChild(buildHeader(dienst, helpers, soll, complete));
+        chart.appendChild(buildHeader(dienst, helpers, requirements, complete));
 
         if (!helpers.length) {
           const empty = document.createElement("div");
@@ -134,7 +156,7 @@
         }
 
         chart.appendChild(buildLegend());
-        chart.appendChild(buildChart(dienst, helpers, coverage, soll));
+        chart.appendChild(buildChart(dienst, helpers, coverageRows));
       }
 
       function ensureChartHost() {
@@ -153,7 +175,7 @@
         return chart;
       }
 
-      function buildHeader(dienst, helpers, soll, complete) {
+      function buildHeader(dienst, helpers, requirements, complete) {
         const head = document.createElement("div");
         head.className = "hg-head";
 
@@ -166,7 +188,7 @@
         const fest = helpers.filter((h) => h.status === "fest").length;
         const gemeldet = helpers.filter((h) => h.status === "gemeldet").length;
         summary.appendChild(pill(`${helpers.length} Personen (${fest} fest, ${gemeldet} gemeldet)`));
-        summary.appendChild(pill(`Soll San/RD: ${soll}`));
+        requirements.forEach((requirement) => summary.appendChild(pill(`Soll ${requirement.label}: ${requirement.count}`)));
         summary.appendChild(pill(complete ? "durchgehend vollständig" : "Lücken vorhanden", complete ? "ok" : "bad"));
 
         head.appendChild(title);
@@ -186,7 +208,7 @@
         return legend;
       }
 
-      function buildChart(dienst, helpers, coverage, soll) {
+      function buildChart(dienst, helpers, coverageRows) {
         const outer = document.createElement("div");
         outer.className = "hg-chart";
         const grid = document.createElement("div");
@@ -208,23 +230,27 @@
         grid.appendChild(label);
         grid.appendChild(time);
 
-        const coverageLabel = document.createElement("div");
-        coverageLabel.className = "hg-row-label hg-coverage-label";
-        coverageLabel.innerHTML = `San/RD-Abdeckung<div class="hg-meta">benötigt: ${soll} gleichzeitig</div>`;
-        const coverageTrack = document.createElement("div");
-        coverageTrack.className = "hg-row-track hg-coverage-track";
-        coverageTrack.style.backgroundSize = `${100 / Math.max(1, Math.ceil((dienst.end - dienst.start) / 60))}% 100%`;
-        for (const seg of coverage) {
-          const el = document.createElement("div");
-          el.className = `hg-segment ${seg.count >= soll ? "hg-segment-ok" : "hg-segment-bad"}`;
-          el.style.left = `${percent(dienst, seg.start)}%`;
-          el.style.width = `${Math.max(.5, percentWidth(dienst, seg.start, seg.end))}%`;
-          el.title = `${minutesToLabel(seg.start)} - ${minutesToLabel(seg.end)} Uhr: ${seg.count}/${soll}`;
-          el.textContent = `${seg.count}/${soll}`;
-          coverageTrack.appendChild(el);
+        for (const row of coverageRows) {
+          const coverageLabel = document.createElement("div");
+          coverageLabel.className = "hg-row-label hg-coverage-label";
+          coverageLabel.innerHTML = `<span></span><div class="hg-meta"></div>`;
+          coverageLabel.querySelector("span").textContent = `${row.requirement.label}-Abdeckung`;
+          coverageLabel.querySelector(".hg-meta").textContent = `benötigt: ${row.requirement.count} gleichzeitig`;
+          const coverageTrack = document.createElement("div");
+          coverageTrack.className = "hg-row-track hg-coverage-track";
+          coverageTrack.style.backgroundSize = `${100 / Math.max(1, Math.ceil((dienst.end - dienst.start) / 60))}% 100%`;
+          for (const seg of row.coverage) {
+            const el = document.createElement("div");
+            el.className = `hg-segment ${seg.count >= row.requirement.count ? "hg-segment-ok" : "hg-segment-bad"}`;
+            el.style.left = `${percent(dienst, seg.start)}%`;
+            el.style.width = `${Math.max(.5, percentWidth(dienst, seg.start, seg.end))}%`;
+            el.title = `${minutesToLabel(seg.start)} - ${minutesToLabel(seg.end)} Uhr: ${seg.count}/${row.requirement.count}`;
+            el.textContent = `${seg.count}/${row.requirement.count}`;
+            coverageTrack.appendChild(el);
+          }
+          grid.appendChild(coverageLabel);
+          grid.appendChild(coverageTrack);
         }
-        grid.appendChild(coverageLabel);
-        grid.appendChild(coverageTrack);
 
         for (const helper of helpers) {
           grid.appendChild(buildHelperLabel(helper));
@@ -288,11 +314,15 @@
             for (const li of items) {
               if (li.closest(`#${CHART_ID}`)) continue;
               const helper = readHelper(li, cfg.status, dienst);
-              if (helper) helpers.push(helper);
+              if (helper) {
+                helper.index = helpers.length;
+                helpers.push(helper);
+              }
             }
           });
         }
-        return helpers.sort((a, b) => a.start - b.start || a.end - b.end || a.name.localeCompare(b.name, "de"));
+        const statusOrder = { fest: 0, gemeldet: 1 };
+        return helpers.sort((a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9) || a.index - b.index);
       }
 
       function readHelper(li, status, dienst) {
@@ -309,7 +339,7 @@
           quals,
           start: times.start,
           end: times.end,
-          qualified: quals.some((q) => QUALIFIED_RE.test(q)),
+          ranks: readQualificationRanks(li, quals),
           u18: note === "U18",
           note
         };
@@ -358,10 +388,89 @@
 
       function readQuals(li) {
         const quals = new Set();
-        const text = norm(li.innerText || li.textContent || "");
-        const matches = text.match(/\b(RA|RS|San|He|EKA|ZF|NFS|NotSan|RettSan|RettAss)\b/g) || [];
-        for (const match of matches) quals.add(match);
+        qualificationTexts(li).forEach((value) => {
+          const text = norm(value);
+          if (!text) return;
+          const matches = text.match(/\b(RA|RS|San|He|EH|EKA|RH|GF|ZF|VF|NFS|NotSan|RettSan|RettAss)\b/g) || [];
+          for (const match of matches) quals.add(match);
+          if (qualificationRank(text, MEDICAL_QUALIFICATIONS) >= 0 || qualificationRank(text, TACTICAL_QUALIFICATIONS) >= 0) quals.add(text);
+        });
         return [...quals];
+      }
+
+      function qualificationTexts(root) {
+        const clone = root.cloneNode(true);
+        clone.querySelectorAll("input, button, select, textarea, svg, img, .hiorg-wa-btn").forEach((el) => el.remove());
+        const values = [clone.innerText || clone.textContent || ""];
+        root.querySelectorAll("[title]").forEach((el) => values.push(el.getAttribute("title") || ""));
+        root.querySelectorAll("select option:checked").forEach((el) => values.push(el.textContent || "", el.value || ""));
+        return values;
+      }
+
+      function readQualificationRanks(root, quals = readQuals(root)) {
+        const texts = [...qualificationTexts(root), ...quals];
+        return {
+          medical: Math.max(-1, ...texts.map((text) => qualificationRank(text, MEDICAL_QUALIFICATIONS))),
+          tactical: Math.max(-1, ...texts.map((text) => qualificationRank(text, TACTICAL_QUALIFICATIONS)))
+        };
+      }
+
+      function qualificationRank(value, definitions) {
+        const text = norm(String(value || ""));
+        if (!text) return -1;
+        if (/^-?\d+$/.test(text) && definitions === MEDICAL_QUALIFICATIONS) return Number(text);
+        return definitions.reduce((rank, entry) => (entry.patterns.some((pattern) => pattern.test(text)) ? Math.max(rank, entry.rank) : rank), -1);
+      }
+
+      function readRequirements() {
+        const requirements = readRequirementTable();
+        if (requirements.length) return requirements;
+        const soll = readSollSanitaeter();
+        return [{ dimension: "medical", rank: 3, count: soll || 2, label: "San/RD" }];
+      }
+
+      function readRequirementTable() {
+        const requirementTable = document.querySelector("#et_ap_liste");
+        if (!requirementTable) return [];
+
+        const requirements = [
+          ...readDimensionRequirements(requirementTable, "status_q1", "medical", "San/RD"),
+          ...readDimensionRequirements(requirementTable, "status_q2", "tactical", "Taktik")
+        ];
+        return mergeRequirements(requirements);
+      }
+
+      function readDimensionRequirements(table, className, dimension, fallbackLabel) {
+        const definitions = dimension === "medical" ? MEDICAL_QUALIFICATIONS : TACTICAL_QUALIFICATIONS;
+        return [...table.querySelectorAll(`tbody.${className} tr[data-soll]`)]
+          .map((row) => {
+            const count = readSollValue(row);
+            const rowRank = Number(row.getAttribute("data-rang"));
+            const labelText = readRequirementLabel(row) || fallbackLabel;
+            const textRank = qualificationRank(`${labelText} ${row.textContent || ""}`, definitions);
+            const rank = Number.isFinite(rowRank) && rowRank >= 0 ? rowRank : textRank;
+            if (count <= 0 || rank < 0) return null;
+            return { dimension, rank, count, label: labelText };
+          })
+          .filter(Boolean);
+      }
+
+      function readRequirementLabel(row) {
+        const qual = [...row.querySelectorAll(".qualiblock:not(.placeholder)")]
+          .map((el) => norm(el.getAttribute("title") || el.textContent || ""))
+          .find(Boolean);
+        return qual || "";
+      }
+
+      function mergeRequirements(requirements) {
+        const merged = new Map();
+        for (const requirement of requirements) {
+          const key = `${requirement.dimension}:${requirement.rank}:${requirement.label}`;
+          const existing = merged.get(key);
+          if (existing) existing.count = Math.max(existing.count, requirement.count);
+          else merged.set(key, { ...requirement });
+        }
+        return [...merged.values()].sort((a, b) => a.dimension.localeCompare(b.dimension) || b.rank - a.rank);
       }
 
       function readSollSanitaeter() {
@@ -421,7 +530,7 @@
         return 0;
       }
 
-      function buildCoverage(dienst, helpers, soll) {
+      function buildCoverage(dienst, helpers, requirement) {
         const points = new Set([dienst.start, dienst.end]);
         helpers.forEach((helper) => {
           points.add(helper.start);
@@ -433,15 +542,19 @@
           const start = sorted[i];
           const end = sorted[i + 1];
           if (end <= start) continue;
-          const count = helpers.filter((helper) => helper.qualified && helper.start <= start && helper.end >= end).length;
+          const count = helpers.filter((helper) => helperMeetsRequirement(helper, requirement) && helper.start <= start && helper.end >= end).length;
           const previous = segments[segments.length - 1];
-          if (previous && previous.count === count && (previous.count >= soll) === (count >= soll)) {
+          if (previous && previous.count === count && (previous.count >= requirement.count) === (count >= requirement.count)) {
             previous.end = end;
           } else {
             segments.push({ start, end, count });
           }
         }
         return segments;
+      }
+
+      function helperMeetsRequirement(helper, requirement) {
+        return (helper.ranks?.[requirement.dimension] ?? -1) >= requirement.rank;
       }
 
       function buildTicks(dienst) {
