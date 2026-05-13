@@ -6,7 +6,7 @@
   window.HiOrgEnhancer?.registerModule({
     id: MOD_ID,
     name: "Dienst-Gantt",
-    defaultEnabled: true,
+    defaultEnabled: false,
     match: (loc) => loc && (
       loc.pathname === "/einteilung_dienst.php"
       || loc.pathname === "/einteilung_dienst_positionen.php"
