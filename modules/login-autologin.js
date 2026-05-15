@@ -5,11 +5,15 @@
 
   window.HiOrgEnhancer?.registerModule({
     id: MOD_ID,
-    name: "Login: Auto-Login (rkbn)",
+    name: "Login: Auto-Login",
     defaultEnabled: true,
     pages: ["/login.php"],
-    run: ({ waitFor, sleep }) => {
-      const OV = "rkbn";
+    run: ({ waitFor, sleep, config }) => {
+      const OV = String(config?.login?.ov || window.HiOrgEnhancerConfig?.login?.ov || "").trim();
+      if (!OV) {
+        console.warn("[HiOrg-Enhancer] loginAutoLogin skipped: config.login.ov is empty.");
+        return;
+      }
 
       const SELECTORS = {
         plz: 'input#plz[name="plz"]',
