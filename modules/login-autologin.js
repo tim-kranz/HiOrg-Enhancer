@@ -5,12 +5,11 @@
 
   window.HiOrgEnhancer?.registerModule({
     id: MOD_ID,
-    name: "Login: Auto-Login",
+    name: "Login: Auto-Login (rkbn)",
     defaultEnabled: true,
     pages: ["/login.php"],
-    run: ({ waitFor, sleep, getVar }) => {
-      const OV = String(getVar?.("hiorg.ov", "") || "").trim();
-      if (!OV) return;
+    run: ({ waitFor, sleep }) => {
+      const OV = "rkbn";
 
       const SELECTORS = {
         plz: 'input#plz[name="plz"]',
