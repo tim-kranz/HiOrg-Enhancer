@@ -15,6 +15,36 @@
   const baseMainRaw = "https://raw.githubusercontent.com/tim-kranz/HiOrg-Enhancer/main";
   const baseMainCdn = "https://cdn.jsdelivr.net/gh/tim-kranz/HiOrg-Enhancer@7e1a773";
 
+  // Lokale Einstellungen für Module.
+  // Diese Datei wird lokal in Tampermonkey installiert; sensible Werte (z. B. API-Keys)
+  // können später hier gepflegt werden, ohne sie in die geladenen Module zu schreiben.
+  const localConfig = {
+    login: {
+      // HiOrg-OV-Kennung für den Auto-Login.
+      ov: "rkbn",
+    },
+    apiKeys: {},
+  };
+
+  function isPlainObject(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function mergeConfig(...configs) {
+    const result = {};
+    for (const config of configs) {
+      if (!isPlainObject(config)) continue;
+      for (const [key, value] of Object.entries(config)) {
+        result[key] = isPlainObject(value) && isPlainObject(result[key])
+          ? mergeConfig(result[key], value)
+          : value;
+      }
+    }
+    return result;
+  }
+
+  window.HiOrgEnhancerConfig = mergeConfig(window.HiOrgEnhancerConfig, localConfig);
+
   const get = (url) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "GET",

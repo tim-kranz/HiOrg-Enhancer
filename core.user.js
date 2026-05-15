@@ -6,12 +6,38 @@
 
   const STORAGE_KEY = "hiorgEnhancer.moduleState.v1";
 
+  const DEFAULT_CONFIG = {
+    login: {
+      ov: "",
+    },
+    apiKeys: {},
+  };
+
+  function isPlainObject(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function mergeConfig(...configs) {
+    const result = {};
+    for (const config of configs) {
+      if (!isPlainObject(config)) continue;
+      for (const [key, value] of Object.entries(config)) {
+        result[key] = isPlainObject(value) && isPlainObject(result[key])
+          ? mergeConfig(result[key], value)
+          : value;
+      }
+    }
+    return result;
+  }
+
   // ---------------------------------------------------------
   // Registry
   // ---------------------------------------------------------
   const Enh = window.HiOrgEnhancer = window.HiOrgEnhancer || {};
   Enh.version = "2.0.2";
   Enh.modules = Enh.modules || new Map();
+  Enh.config = mergeConfig(DEFAULT_CONFIG, window.HiOrgEnhancerConfig);
+  window.HiOrgEnhancerConfig = Enh.config;
 
   // Module, die NICHT im Menü erscheinen sollen
   // (werden trotzdem normal registriert und ausgeführt)
@@ -148,6 +174,7 @@
   Enh.util.sleep = sleep;
   Enh.util.waitFor = waitFor;
   Enh.util.norm = norm;
+  Enh.util.config = Enh.config;
 
   // ---------------------------------------------------------
   // UI (ein Panel, immer re-renderbar)
