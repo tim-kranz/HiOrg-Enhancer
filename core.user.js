@@ -7,11 +7,25 @@
   const STORAGE_KEY = "hiorgEnhancer.moduleState.v1";
 
   // ---------------------------------------------------------
+  // Lokale Variablen (bewusst hier pflegen)
+  // ---------------------------------------------------------
+  // Diese Datei kann lokal angepasst werden. Module lesen Werte über
+  // HiOrgEnhancer.vars / util.getVar, damit z.B. Organisationskürzel
+  // oder später API-Keys nicht in einzelnen Modulen hart codiert sind.
+  const LOCAL_VARS = {
+    hiorg: {
+      ov: "rkbn"
+    },
+    apiKeys: {}
+  };
+
+  // ---------------------------------------------------------
   // Registry
   // ---------------------------------------------------------
   const Enh = window.HiOrgEnhancer = window.HiOrgEnhancer || {};
   Enh.version = "2.0.2";
   Enh.modules = Enh.modules || new Map();
+  Enh.vars = LOCAL_VARS;
 
   // Module, die NICHT im Menü erscheinen sollen
   // (werden trotzdem normal registriert und ausgeführt)
@@ -108,6 +122,20 @@
       .trim();
   }
 
+  function getVar(path, fallback = undefined) {
+    if (!path) return fallback;
+
+    const parts = String(path).split(".").filter(Boolean);
+    let current = Enh.vars;
+
+    for (const part of parts) {
+      if (!current || typeof current !== "object" || !(part in current)) return fallback;
+      current = current[part];
+    }
+
+    return current === undefined ? fallback : current;
+  }
+
   // ---------------------------------------------------------
   // Dev-Only Modules (nur für bestimmte Nutzer sichtbar)
   // ---------------------------------------------------------
@@ -148,12 +176,13 @@
   Enh.util.sleep = sleep;
   Enh.util.waitFor = waitFor;
   Enh.util.norm = norm;
+  Enh.util.getVar = getVar;
 
   // ---------------------------------------------------------
   // UI (ein Panel, immer re-renderbar)
   // ---------------------------------------------------------
   function ensurePanelHost() {
-  // Ziel: Panel oberhalb der ersten Accordion-Box "HiOrg-Server RKBN"
+  // Ziel: Panel oberhalb der ersten Accordion-Box "HiOrg-Server"
   const wrap = document.querySelector("#menu_row_00_wrap");
   if (!wrap) return null;
 
